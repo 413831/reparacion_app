@@ -1,0 +1,18 @@
+{
+  "@@locale": "es",
+  "appTitle": "Reparatutti",
+  "termsTitle": "Términos y Privacidad Legal",
+  "acceptTerms": "Aceptar y Continuar",
+  "legalComplianceNote": "Marco regulatorio: Ley 25.326 y Ley 24.240 (República Argentina)",
+  "kycTitle": "Validación de Identidad (KYC)",
+  "kycPending": "Validación en Proceso",
+  "kycVerified": "Identidad Verificada con Éxito",
+  "shareExactLocation": "Enviar dirección exacta",
+  "privateLocationNotice": "Visible solo para este técnico aceptado",
+  "tradeElectricidad": "Electricidad",
+  "tradePintura": "Pintura",
+  "tradeGas": "Gas",
+  "tradeConstruccion": "Construcción",
+  "tradeFlete": "Flete",
+  "tradeReparacionEdilicia": "Reparación Edilicia"
+}
