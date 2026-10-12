@@ -26,18 +26,22 @@ func NewJobHandler(jobService *services.JobService, jobRepo ports.JobRepository,
 }
 
 type CreateJobRequest struct {
-	Category        domain.TradeCategory `json:"category" binding:"required"`
-	Title           string               `json:"title" binding:"required"`
-	Description     string               `json:"description" binding:"required"`
-	Locality        string               `json:"locality" binding:"required"`
-	ScheduleDate    time.Time            `json:"schedule_date" binding:"required"`
-	Photos          []string             `json:"photos"`
+	Category     domain.TradeCategory `json:"category" binding:"required"`
+	Title        string               `json:"title" binding:"required"`
+	Description  string               `json:"description" binding:"required"`
+	Locality     string               `json:"locality" binding:"required"`
+	ScheduledAt  time.Time            `json:"scheduled_at" binding:"required"`
+	Photos       []string             `json:"photos"`
 }
 
 type ApplyJobRequest struct {
 	EstimatedBudget float64 `json:"estimated_budget" binding:"required,gt=0"`
 	DurationHours   int     `json:"duration_hours" binding:"required,gt=0"`
 	CoverNote       string  `json:"cover_note"`
+}
+
+type ConfirmStatusRequest struct {
+	TargetStatus domain.JobStatus `json:"target_status" binding:"required"`
 }
 
 func (h *JobHandler) CreateJob(c *gin.Context) {
@@ -49,7 +53,7 @@ func (h *JobHandler) CreateJob(c *gin.Context) {
 		return
 	}
 
-	job, err := h.jobService.CreateJob(c.Request.Context(), clientID, req.Category, req.Title, req.Description, req.Locality, req.ScheduleDate, req.Photos)
+	job, err := h.jobService.CreateJob(c.Request.Context(), clientID, req.Category, req.Title, req.Description, req.Locality, req.ScheduledAt, req.Photos)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -91,8 +95,6 @@ func (h *JobHandler) GetJob(c *gin.Context) {
 	c.JSON(http.StatusOK, job)
 }
 
-// Apply handles technician proposal submission.
-// Rejects technician if not KYC verified!
 func (h *JobHandler) ApplyForJob(c *gin.Context) {
 	technicianID := c.MustGet("user_id").(uuid.UUID)
 	jobID, err := uuid.Parse(c.Param("id"))
@@ -153,25 +155,40 @@ func (h *JobHandler) AcceptProposal(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Presupuesto aceptado. El técnico ha sido asignado y el chat privado 1:1 ya está habilitado.",
+		"message": "Presupuesto aceptado. Esperando confirmación de fecha para transicionar a 'agendado'.",
 		"job":     job,
 	})
 }
 
-func (h *JobHandler) CompleteJob(c *gin.Context) {
-	clientID := c.MustGet("user_id").(uuid.UUID)
+// ConfirmStatus handles the Double Confirmation endpoint
+func (h *JobHandler) ConfirmStatus(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
 	jobID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid job id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id de trabajo inválido"})
 		return
 	}
 
-	if err := h.jobService.CompleteJob(c.Request.Context(), clientID, jobID); err != nil {
+	var req ConfirmStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
+	job, transitioned, err := h.jobService.ConfirmJobStatusTransition(c.Request.Context(), jobID, userID, req.TargetStatus)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	message := "Confirmación registrada. Pendiente la confirmación de la otra parte."
+	if transitioned {
+		message = "¡Doble confirmación completada! El estado oficial del trabajo se actualizó a: " + string(job.Status)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Servicio marcado como completado. Ya puede calificar al técnico.",
+		"message":      message,
+		"transitioned": transitioned,
+		"job":          job,
 	})
 }

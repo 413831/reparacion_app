@@ -5,24 +5,25 @@ import (
 	"database/sql"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/reparatutti/backend/internal/core/domain"
 	"github.com/reparatutti/backend/internal/core/ports"
 )
 
-// InMemoryUserRepo provides thread-safe in-memory storage for MVP testing
-// while conforming strictly to ports.UserRepository
 type InMemoryUserRepo struct {
-	mu      sync.RWMutex
-	users   map[uuid.UUID]*domain.User
-	byEmail map[string]uuid.UUID
+	mu           sync.RWMutex
+	users        map[uuid.UUID]*domain.User
+	byEmail      map[string]uuid.UUID
+	notifConfigs map[uuid.UUID]*domain.NotificationConfig
 }
 
 func NewInMemoryUserRepo() *InMemoryUserRepo {
 	return &InMemoryUserRepo{
-		users:   make(map[uuid.UUID]*domain.User),
-		byEmail: make(map[string]uuid.UUID),
+		users:        make(map[uuid.UUID]*domain.User),
+		byEmail:      make(map[string]uuid.UUID),
+		notifConfigs: make(map[uuid.UUID]*domain.NotificationConfig),
 	}
 }
 
@@ -37,6 +38,15 @@ func (r *InMemoryUserRepo) Create(ctx context.Context, user *domain.User) error 
 	copy := *user
 	r.users[user.ID] = &copy
 	r.byEmail[user.Email] = user.ID
+	r.notifConfigs[user.ID] = &domain.NotificationConfig{
+		UserID:              user.ID,
+		PushEnabled:         true,
+		EmailEnabled:        true,
+		SMSEnabled:          false,
+		Reminders24hEnabled: true,
+		Reminders2hEnabled:  true,
+		UpdatedAt:           time.Now(),
+	}
 	return nil
 }
 
@@ -90,29 +100,70 @@ func (r *InMemoryUserRepo) UpdateRating(ctx context.Context, id uuid.UUID, newRa
 }
 
 func (r *InMemoryUserRepo) LogLegalConsent(ctx context.Context, userID uuid.UUID, action, ip, userAgent, version string) error {
-	// Consents logged to audit store
+	return nil
+}
+
+func (r *InMemoryUserRepo) SuspendAccount(ctx context.Context, id uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	user, exists := r.users[id]
+	if !exists {
+		return errors.New("user not found")
+	}
+	user.AccountStatus = domain.AccountStatusSuspended
+	user.IsActive = false
+	user.UpdatedAt = time.Now()
+	return nil
+}
+
+func (r *InMemoryUserRepo) DeleteAccount(ctx context.Context, id uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	user, exists := r.users[id]
+	if !exists {
+		return errors.New("user not found")
+	}
+	now := time.Now()
+	user.AccountStatus = domain.AccountStatusDeleted
+	user.IsActive = false
+	user.DeletedAt = &now
+	user.UpdatedAt = now
+	return nil
+}
+
+func (r *InMemoryUserRepo) GetNotificationConfig(ctx context.Context, userID uuid.UUID) (*domain.NotificationConfig, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	cfg, exists := r.notifConfigs[userID]
+	if !exists {
+		return &domain.NotificationConfig{
+			UserID:              userID,
+			PushEnabled:         true,
+			EmailEnabled:        true,
+			SMSEnabled:          false,
+			Reminders24hEnabled: true,
+			Reminders2hEnabled:  true,
+			UpdatedAt:           time.Now(),
+		}, nil
+	}
+	copy := *cfg
+	return &copy, nil
+}
+
+func (r *InMemoryUserRepo) UpdateNotificationConfig(ctx context.Context, config *domain.NotificationConfig) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	copy := *config
+	copy.UpdatedAt = time.Now()
+	r.notifConfigs[config.UserID] = &copy
 	return nil
 }
 
 var _ ports.UserRepository = (*InMemoryUserRepo)(nil)
-
-// SQL Queries for PostgreSQL implementation
-const (
-	SQLUserInsert = `
-		INSERT INTO users (id, email, password_hash, full_name, phone_number, role, auth_provider, terms_accepted_at, terms_version, kyc_status, trade, rating_average, reviews_count, is_active, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16);
-	`
-	SQLUserGetByID = `
-		SELECT id, email, password_hash, full_name, phone_number, role, auth_provider, auth_provider_id, avatar_url, terms_accepted_at, terms_version, kyc_status, trade, rating_average, reviews_count, is_active, created_at, updated_at
-		FROM users WHERE id = $1 AND deleted_at IS NULL;
-	`
-	SQLUserUpdateKYC = `
-		UPDATE users SET kyc_status = $2, updated_at = NOW() WHERE id = $1;
-	`
-	SQLUserUpdateRating = `
-		UPDATE users SET rating_average = $2, reviews_count = $3, updated_at = NOW() WHERE id = $1;
-	`
-)
 
 type PostgresUserRepo struct {
 	db *sql.DB

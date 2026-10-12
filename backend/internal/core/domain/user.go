@@ -16,6 +16,16 @@ const (
 	RoleAdmin      UserRole = "admin"
 )
 
+type UserAccountStatus string
+
+const (
+	AccountStatusActive    UserAccountStatus = "active"
+	AccountStatusSuspended UserAccountStatus = "suspended"
+	AccountStatusDeleted   UserAccountStatus = "deleted"
+)
+
+const DefaultTermsPlaceholder = "[CONFIG_TERMINOS_Y_CONDICIONES_LEGALES]"
+
 type TradeCategory string
 
 const (
@@ -28,24 +38,26 @@ const (
 )
 
 type User struct {
-	ID               uuid.UUID      `json:"id"`
-	Email            string         `json:"email"`
-	PasswordHash     string         `json:"-"`
-	FullName         string         `json:"full_name"`
-	PhoneNumber      string         `json:"phone_number"`
-	Role             UserRole       `json:"role"`
-	AuthProvider     string         `json:"auth_provider"` // local, google, apple
-	AuthProviderID   string         `json:"auth_provider_id,omitempty"`
-	AvatarURL        string         `json:"avatar_url,omitempty"`
-	TermsAcceptedAt  time.Time      `json:"terms_accepted_at"`
-	TermsVersion     string         `json:"terms_version"`
-	KYCStatus        KYCStatus      `json:"kyc_status"`
-	Trade            *TradeCategory `json:"trade,omitempty"`
-	RatingAverage    float64        `json:"rating_average"`
-	ReviewsCount     int            `json:"reviews_count"`
-	IsActive         bool           `json:"is_active"`
-	CreatedAt        time.Time      `json:"created_at"`
-	UpdatedAt        time.Time      `json:"updated_at"`
+	ID               uuid.UUID         `json:"id"`
+	Email            string            `json:"email"`
+	PasswordHash     string            `json:"-"`
+	FullName         string            `json:"full_name"`
+	PhoneNumber      string            `json:"phone_number"`
+	Role             UserRole          `json:"role"`
+	AccountStatus    UserAccountStatus `json:"account_status"`
+	AuthProvider     string            `json:"auth_provider"` // local, google, apple
+	AuthProviderID   string            `json:"auth_provider_id,omitempty"`
+	AvatarURL        string            `json:"avatar_url,omitempty"`
+	TermsAcceptedAt  time.Time         `json:"terms_accepted_at"`
+	TermsVersion     string            `json:"terms_version"`
+	KYCStatus        KYCStatus         `json:"kyc_status"`
+	Trade            *TradeCategory    `json:"trade,omitempty"`
+	RatingAverage    float64           `json:"rating_average"`
+	ReviewsCount     int               `json:"reviews_count"`
+	IsActive         bool              `json:"is_active"`
+	CreatedAt        time.Time         `json:"created_at"`
+	UpdatedAt        time.Time         `json:"updated_at"`
+	DeletedAt        *time.Time        `json:"deleted_at,omitempty"`
 }
 
 var (
@@ -61,7 +73,8 @@ func (u *User) CanApplyForJobs() bool {
 	if u.Role != RoleTechnician {
 		return false
 	}
-	return u.KYCStatus == KYCVerified && u.IsActive
+	isAccountOk := u.AccountStatus == "" || u.AccountStatus == AccountStatusActive
+	return u.KYCStatus == KYCVerified && u.IsActive && isAccountOk
 }
 
 // CalculateNewRating computes cumulative moving average:

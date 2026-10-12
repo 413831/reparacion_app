@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/shimmer_loader.dart';
+import '../../navigation/presentation/app_drawer.dart';
+import '../../jobs/presentation/widgets/job_status_action_card.dart';
+import '../../jobs/presentation/widgets/job_summary_card.dart';
+import '../../jobs/presentation/widgets/quick_request_wizard_modal.dart';
 
 class HomeDashboardScreen extends StatefulWidget {
   const HomeDashboardScreen({super.key});
@@ -11,9 +15,16 @@ class HomeDashboardScreen extends StatefulWidget {
 }
 
 class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
-  bool _isLoading = false;
   bool _isTechnician = false;
+  bool _isLoading = false;
   String _selectedCategory = 'Todos';
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
+
+  // State machine simulation for double confirmation
+  String _jobStatus = 'pendiente_de_aceptacion';
+  bool _clientConfirmed = false;
+  bool _techConfirmed = false;
 
   final List<Map<String, dynamic>> _categories = [
     {'name': 'Todos', 'icon': Icons.apps_rounded},
@@ -25,10 +36,60 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     {'name': 'Reparación Edilicia', 'icon': Icons.home_repair_service_rounded},
   ];
 
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   void _triggerRefreshSimulation() {
     setState(() => _isLoading = true);
-    Future.delayed(const Duration(milliseconds: 1200), () {
+    Future.delayed(const Duration(milliseconds: 900), () {
       if (mounted) setState(() => _isLoading = false);
+    });
+  }
+
+  void _openQuickRequestWizard() {
+    QuickRequestWizardModal.show(context, (jobData) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('¡Trabajo "${jobData['title']}" publicado exitosamente!'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+      setState(() {
+        _jobStatus = 'pendiente_de_aceptacion';
+        _clientConfirmed = false;
+        _techConfirmed = false;
+      });
+    });
+  }
+
+  void _handleConfirmStatus(String targetStatus) {
+    setState(() {
+      if (_isTechnician) {
+        _techConfirmed = true;
+      } else {
+        _clientConfirmed = true;
+      }
+
+      // Check double confirmation rule
+      if (_clientConfirmed && _techConfirmed) {
+        _jobStatus = targetStatus;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('¡Doble confirmación exitosa! Estado global actualizado a: $targetStatus'),
+            backgroundColor: AppColors.success,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Confirmación registrada. Esperando a la otra parte para actualizar.'),
+            backgroundColor: AppColors.warning,
+          ),
+        );
+      }
     });
   }
 
@@ -37,8 +98,17 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
+      drawer: AppDrawer(
+        isTechnician: _isTechnician,
+        onToggleRole: () {
+          setState(() => _isTechnician = !_isTechnician);
+        },
+      ),
       appBar: AppBar(
+        centerTitle: false,
+        titleSpacing: 0,
         title: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Container(
               padding: const EdgeInsets.all(6),
@@ -49,332 +119,374 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               child: const Icon(Icons.build_circle_rounded, color: AppColors.pureBlack, size: 20),
             ),
             const SizedBox(width: 8),
-            const Text(
-              'Reparatutti',
-              style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.5),
+            Flexible(
+              child: Text(
+                _isTechnician ? 'Reparatutti Pro' : 'Reparatutti',
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.5),
+              ),
             ),
           ],
         ),
         actions: [
           IconButton(
-            tooltip: 'Simular Carga Shimmer',
+            tooltip: 'Simular Shimmer',
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _triggerRefreshSimulation,
           ),
           IconButton(
-            tooltip: 'Términos Legales (Ley 25.326)',
-            icon: const Icon(Icons.description_outlined),
-            onPressed: () => context.push('/terms'),
+            tooltip: 'Alternar Rol',
+            icon: Icon(_isTechnician ? Icons.engineering_rounded : Icons.person_rounded),
+            onPressed: () {
+              setState(() => _isTechnician = !_isTechnician);
+            },
           ),
         ],
       ),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.symmetric(vertical: 16),
+          padding: const EdgeInsets.symmetric(vertical: 12),
           children: [
-            // User Role & KYC Switcher Card
-            _buildRoleBanner(isDark),
-            const SizedBox(height: 16),
-
-            // Horizontal Trade Categories Filter
-            _buildCategorySelector(isDark),
-            const SizedBox(height: 16),
-
-            // Section Header
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    _isTechnician ? 'Trabajos Disponibles para Presupuestar' : 'Mis Solicitudes Activas',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  Text(
-                    _isLoading ? 'Cargando...' : '1 activo',
-                    style: TextStyle(fontSize: 12, color: isDark ? Colors.grey[400] : Colors.grey[600]),
-                  ),
-                ],
-              ),
-            ),
+            // Mode Banner
+            _buildModeBanner(isDark),
             const SizedBox(height: 12),
 
-            // Feed Content (Shimmer vs Job Cards)
-            if (_isLoading) ...[
-              const JobCardSkeleton(),
-              const JobCardSkeleton(),
+            // CLIENT VIEW vs TECHNICIAN VIEW
+            if (!_isTechnician) ...[
+              _buildClientHomeView(isDark),
             ] else ...[
-              _buildSampleJobCard(isDark),
+              _buildTechnicianHomeView(isDark),
             ],
 
-            const SizedBox(height: 24),
-            // Quick Access Hub for Evaluation
-            _buildQuickActionsCard(isDark),
+            const SizedBox(height: 16),
+
+            // Interactive Double Confirmation Card Demonstration
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              child: Text(
+                'Orden en Curso: Instalación de disyuntor',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              ),
+            ),
+            JobStatusActionCard(
+              currentStatus: _jobStatus,
+              isClient: !_isTechnician,
+              clientConfirmed: _clientConfirmed,
+              techConfirmed: _techConfirmed,
+              onConfirmAgendado: () => _handleConfirmStatus('agendado'),
+              onConfirmFinalizado: () => _handleConfirmStatus('finalizado'),
+              onConfirmCancelado: () => _handleConfirmStatus('cancelado'),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildRoleBanner(bool isDark) {
+  Widget _buildModeBanner(bool isDark) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isDark ? AppColors.borderDark : AppColors.borderLight,
-        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isDark ? AppColors.borderDark : AppColors.borderLight),
       ),
-      child: Column(
+      child: Row(
         children: [
-          Row(
+          Icon(
+            _isTechnician ? Icons.engineering_rounded : Icons.home_repair_service_rounded,
+            size: 20,
+            color: isDark ? AppColors.mustardDark : AppColors.mustardLight,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              _isTechnician
+                  ? 'Modo Técnico: Descubrí solicitudes y respondé cotizaciones'
+                  : 'Modo Cliente: Agendá reparaciones en 3 simples pasos',
+              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==========================================================================
+  // CLIENTE: Foco 100% en agendamiento ultra rápido
+  // ==========================================================================
+  Widget _buildClientHomeView(bool isDark) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Prominent CTA "Pedir trabajo"
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: isDark
+                  ? [const Color(0xFF332608), const Color(0xFF1F1A07)]
+                  : [const Color(0xFFFEF3C7), const Color(0xFFFFFBEB)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: isDark ? const Color(0xFF664D10) : const Color(0xFFFDE68A),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircleAvatar(
-                backgroundColor: (isDark ? AppColors.mustardDark : AppColors.mustardLight).withValues(alpha: 0.2),
-                child: Icon(
-                  _isTechnician ? Icons.engineering_rounded : Icons.person_rounded,
-                  color: isDark ? AppColors.mustardDark : AppColors.mustardLight,
+              const Text(
+                '¿Necesitás una reparación en tu hogar?',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.4),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Publicá tu solicitud y recibí presupuestos de técnicos verificados en minutos.',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: isDark ? Colors.grey[300] : Colors.grey[700],
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _isTechnician ? 'Modo Técnico (Carlos Benítez)' : 'Modo Cliente (Lucía Fernández)',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _openQuickRequestWizard,
+                      icon: const Icon(Icons.add_task_rounded, size: 20),
+                      label: const Text('Pedir trabajo', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
                     ),
-                    Row(
-                      children: const [
-                        Icon(Icons.verified, size: 13, color: AppColors.success),
-                        SizedBox(width: 4),
-                        Text(
-                          'KYC Verificado • Calificación 4.85 ★',
-                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  const SizedBox(width: 10),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      _showAgendaDialog(context);
+                    },
+                    icon: const Icon(Icons.calendar_today_rounded, size: 16),
+                    label: const Text('Agenda'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ==========================================================================
+  // TÉCNICO: Foco en responder y atender demanda
+  // ==========================================================================
+  Widget _buildTechnicianHomeView(bool isDark) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Shortcuts: "Agenda" y "Chats" activos
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          child: Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  onTap: () => _showAgendaDialog(context),
+                  borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: isDark ? AppColors.borderDark : AppColors.borderLight),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_month_rounded, color: AppColors.mustardLight, size: 22),
+                        const SizedBox(width: 10),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const [
+                            Text('Mi Agenda', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            Text('1 programado', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                          ],
                         ),
                       ],
                     ),
-                  ],
+                  ),
                 ),
               ),
-              Switch(
-                value: _isTechnician,
-                activeThumbColor: isDark ? AppColors.mustardDark : AppColors.mustardLight,
-                onChanged: (val) {
-                  setState(() => _isTechnician = val);
-                },
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCategorySelector(bool isDark) {
-    return SizedBox(
-      height: 42,
-      child: ListView.separated(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        scrollDirection: Axis.horizontal,
-        itemCount: _categories.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (context, i) {
-          final cat = _categories[i];
-          final isSelected = _selectedCategory == cat['name'];
-          return ChoiceChip(
-            label: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(cat['icon'] as IconData, size: 16),
-                const SizedBox(width: 6),
-                Text(cat['name'] as String),
-              ],
-            ),
-            selected: isSelected,
-            selectedColor: isDark ? AppColors.mustardDark : AppColors.mustardLight,
-            labelStyle: TextStyle(
-              color: isSelected
-                  ? AppColors.pureBlack
-                  : (isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight),
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-              fontSize: 12.5,
-            ),
-            onSelected: (_) {
-              setState(() => _selectedCategory = cat['name'] as String);
-            },
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildSampleJobCard(bool isDark) {
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF2E2410) : const Color(0xFFFEF3C7),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Text(
-                    'Electricidad',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.mustardLight,
+              const SizedBox(width: 10),
+              Expanded(
+                child: InkWell(
+                  onTap: () => context.push('/chat/44444444-4444-4444-4444-444444444444'),
+                  borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: isDark ? AppColors.borderDark : AppColors.borderLight),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.chat_bubble_outline_rounded, color: AppColors.mustardLight, size: 22),
+                        const SizedBox(width: 10),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const [
+                            Text('Chats Activos', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            Text('Responder al instante', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: AppColors.success.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const Text(
-                    'Asignado / En Curso',
-                    style: TextStyle(fontSize: 11, color: AppColors.success, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'Instalación de disyuntor y recableado de cocina',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Corte térmico frecuente al conectar horno eléctrico. Se necesita cambio de disyuntor diferencial y revisión térmica.',
-              style: TextStyle(
-                fontSize: 13.5,
-                color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
-                height: 1.4,
               ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+
+        // Search Bar in real time
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          child: TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: 'Buscar trabajos por palabra clave o zona...',
+              prefixIcon: const Icon(Icons.search_rounded),
+              suffixIcon: _searchQuery.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear_rounded),
+                      onPressed: () {
+                        setState(() {
+                          _searchController.clear();
+                          _searchQuery = '';
+                        });
+                      },
+                    )
+                  : null,
             ),
-            const SizedBox(height: 12),
-            Row(
-              children: const [
-                Icon(Icons.location_on_outlined, size: 16, color: Colors.grey),
-                SizedBox(width: 4),
-                Text('Palermo Soho, CABA', style: TextStyle(fontSize: 12.5, color: Colors.grey)),
-                Spacer(),
-                Icon(Icons.calendar_today_outlined, size: 14, color: Colors.grey),
-                SizedBox(width: 4),
-                Text('Mañana 10:00 hs', style: TextStyle(fontSize: 12.5, color: Colors.grey)),
-              ],
-            ),
-            const Divider(height: 24),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text('Técnico Asignado:', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                    Text('Carlos Benítez (4.85 ★)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            onChanged: (val) {
+              setState(() => _searchQuery = val);
+            },
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // Horizontal Category Chips
+        SizedBox(
+          height: 38,
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            scrollDirection: Axis.horizontal,
+            itemCount: _categories.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (context, i) {
+              final cat = _categories[i];
+              final isSelected = _selectedCategory == cat['name'];
+              return ChoiceChip(
+                label: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(cat['icon'] as IconData, size: 14),
+                    const SizedBox(width: 4),
+                    Text(cat['name'] as String),
                   ],
                 ),
-                ElevatedButton.icon(
-                  onPressed: () => context.push('/chat/44444444-4444-4444-4444-444444444444'),
-                  icon: const Icon(Icons.chat_bubble_outline_rounded, size: 16),
-                  label: const Text('Abrir Chat 1:1'),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  ),
+                selected: isSelected,
+                selectedColor: isDark ? AppColors.mustardDark : AppColors.mustardLight,
+                labelStyle: TextStyle(
+                  color: isSelected ? AppColors.pureBlack : null,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                  fontSize: 12,
                 ),
-              ],
-            ),
-          ],
+                onSelected: (_) => setState(() => _selectedCategory = cat['name'] as String),
+              );
+            },
+          ),
         ),
-      ),
-    );
-  }
+        const SizedBox(height: 14),
 
-  Widget _buildQuickActionsCard(bool isDark) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isDark ? AppColors.borderDark : AppColors.borderLight,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Accesos Rápidos del MVP',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-          ),
-          const SizedBox(height: 12),
-          _buildActionTile(
-            icon: Icons.shield_outlined,
-            title: 'Verificación de Identidad (KYC)',
-            subtitle: 'DNI frente/dorso + prueba de vida facial',
-            onTap: () => context.push('/kyc?role=${_isTechnician ? "technician" : "client"}'),
-          ),
-          const Divider(height: 16),
-          _buildActionTile(
-            icon: Icons.gavel_rounded,
-            title: 'Términos y Condiciones (Argentina)',
-            subtitle: 'Ley 25.326 de Protección de Datos y Derechos ARCO',
-            onTap: () => context.push('/terms'),
-          ),
-          const Divider(height: 16),
-          _buildActionTile(
-            icon: Icons.pin_drop_rounded,
-            title: 'Chat 1:1 con Compartir Ubicación',
-            subtitle: 'Mensajería y tarjeta con vista previa de mapa',
-            onTap: () => context.push('/chat/44444444-4444-4444-4444-444444444444'),
+        // Available Job Feed Item
+        if (_isLoading) ...[
+          const JobCardSkeleton(),
+        ] else ...[
+          JobSummaryCard(
+            tradeTitle: 'Instalación de disyuntor y recableado',
+            status: 'agendado',
+            scheduledDateText: 'Martes 14 Oct • 10:00 hs',
+            addressText: 'Honduras 4820, Palermo Soho, CABA',
+            budgetEstimateText: r'$45.000',
+            actionButtonText: 'Aceptar Trabajo',
+            onActionPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Trabajo aceptado exitosamente.')),
+              );
+            },
           ),
         ],
-      ),
+      ],
     );
   }
 
-  Widget _buildActionTile({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4.0),
-        child: Row(
+  void _showAgendaDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
           children: [
-            Icon(icon, size: 22, color: AppColors.mustardLight),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
+            Icon(Icons.calendar_month_rounded, color: AppColors.mustardLight),
+            SizedBox(width: 8),
+            Text('Agenda Sincronizada'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Próximos Trabajos Agendados:',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.info.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.info.withValues(alpha: 0.3)),
+              ),
+              child: const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
-                  Text(subtitle, style: const TextStyle(fontSize: 11.5, color: Colors.grey)),
+                  Text('Instalación de disyuntor', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  SizedBox(height: 4),
+                  Text('Fecha: Mañana a las 10:00 hs', style: TextStyle(fontSize: 12)),
+                  Text('Estado: agendado (Doble confirmación OK)', style: TextStyle(fontSize: 11, color: AppColors.info)),
+                  SizedBox(height: 6),
+                  Text('🔔 Recordatorios programados: 24h antes y 2h antes', style: TextStyle(fontSize: 10.5, color: Colors.grey)),
                 ],
               ),
             ),
-            const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey),
           ],
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cerrar'),
+          ),
+        ],
       ),
     );
   }

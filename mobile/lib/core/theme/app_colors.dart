@@ -17,11 +17,16 @@ class AppColors {
   static const Color borderLight = Color(0xFFE5E7EB);
   static const Color borderDark = Color(0xFF333333);
 
-  // Text
-  static const Color textPrimaryLight = Color(0xFF111827);
-  static const Color textSecondaryLight = Color(0xFF6B7280);
-  static const Color textPrimaryDark = Color(0xFFF9FAFB);
-  static const Color textSecondaryDark = Color(0xFF9CA3AF);
+  // Typography - High Contrast for outdoor & 30-50 age readability
+  // Light Mode
+  static const Color textPrimaryLight = Color(0xFF1A1A1A);
+  static const Color textSecondaryLight = Color(0xFF6C757D);
+  static const Color buttonTextLight = Color(0xFF1A1A1A);
+
+  // Dark Mode
+  static const Color textPrimaryDark = Color(0xFFF5F5F5);
+  static const Color textSecondaryDark = Color(0xFFA0A0A0);
+  static const Color buttonTextDark = Color(0xFF121212);
 
   // Status & Feedback
   static const Color success = Color(0xFF10B981);

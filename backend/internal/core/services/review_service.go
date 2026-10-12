@@ -43,7 +43,7 @@ func (s *ReviewService) SubmitReview(ctx context.Context, clientID, jobID uuid.U
 		return nil, domain.ErrOnlyClientCanReview
 	}
 
-	if job.Status != domain.JobStatusCompleted {
+	if job.Status != domain.StatusFinalizado {
 		return nil, domain.ErrJobNotFinished
 	}
 

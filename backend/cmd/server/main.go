@@ -16,6 +16,7 @@ import (
 	"github.com/reparatutti/backend/internal/adapters/handlers/middleware"
 	"github.com/reparatutti/backend/internal/adapters/handlers/ws"
 	"github.com/reparatutti/backend/internal/adapters/identity"
+	"github.com/reparatutti/backend/internal/adapters/notification"
 	"github.com/reparatutti/backend/internal/adapters/repository/postgres"
 	"github.com/reparatutti/backend/internal/core/domain"
 	"github.com/reparatutti/backend/internal/core/services"
@@ -37,17 +38,22 @@ func main() {
 
 	// 2. Adapters & Ports
 	identityVerifier := identity.NewMockIdentityVerifier()
+	multichannelNotifier := notification.NewMockMultichannelNotifier(userRepo)
 
 	// 3. Domain Services
 	kycService := services.NewKYCService(userRepo, kycRepo, identityVerifier)
-	jobService := services.NewJobService(jobRepo, proposalRepo, userRepo)
+	jobService := services.NewJobService(jobRepo, proposalRepo, userRepo, multichannelNotifier)
 	reviewService := services.NewReviewService(reviewRepo, jobRepo, userRepo)
+	
+	// 4. Background Scheduled Reminder Service (Ticker)
+	reminderScheduler := services.NewReminderSchedulerService(jobRepo, userRepo, multichannelNotifier)
+	reminderScheduler.Start(30 * time.Second)
 
-	// 4. WebSocket Hub
+	// 5. WebSocket Hub
 	wsHub := ws.NewHub(chatRepo, jobRepo)
 	go wsHub.Run()
 
-	// 5. Middlewares
+	// 6. Middlewares
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
 		jwtSecret = "super-secure-reparatutti-jwt-secret-key-2026"
@@ -55,17 +61,18 @@ func main() {
 	authMw := middleware.NewAuthMiddleware(jwtSecret)
 	rateLimiter := middleware.NewTokenBucketRateLimiter(80, 20) // 80 RPM with burst of 20
 
-	// 6. HTTP & WS Handlers
+	// 7. HTTP & WS Handlers
 	authHandler := httpHandlers.NewAuthHandler(userRepo, authMw)
 	kycHandler := httpHandlers.NewKYCHandler(kycService)
 	jobHandler := httpHandlers.NewJobHandler(jobService, jobRepo, proposalRepo)
 	reviewHandler := httpHandlers.NewReviewHandler(reviewService)
+	userHandler := httpHandlers.NewUserHandler(userRepo)
 	chatWSHandler := ws.NewChatWSHandler(wsHub, jobRepo)
 
 	// Seed Sample Data for Testing / Demo
 	seedDatabase(userRepo, jobRepo)
 
-	// 7. Gin Engine & Routing
+	// 8. Gin Engine & Routing
 	router := gin.Default()
 	router.Use(gin.Recovery())
 
@@ -77,7 +84,7 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{
 			"status":    "healthy",
 			"timestamp": time.Now().Format(time.RFC3339),
-			"version":   "1.0.0-mvp",
+			"version":   "1.1.0-mvp",
 		})
 	})
 
@@ -95,6 +102,15 @@ func main() {
 		protected := api.Group("")
 		protected.Use(authMw.Authenticate())
 		{
+			// User Account Management & Preferences (App Store Guideline 5.1.1)
+			userGroup := protected.Group("/users/me")
+			{
+				userGroup.POST("/suspend", userHandler.SuspendAccount)
+				userGroup.POST("/delete", userHandler.DeleteAccount)
+				userGroup.GET("/notifications", userHandler.GetNotificationPreferences)
+				userGroup.PUT("/notifications", userHandler.UpdateNotificationPreferences)
+			}
+
 			// KYC Verification
 			protected.POST("/kyc/submit", kycHandler.SubmitVerification)
 			protected.GET("/kyc/status", kycHandler.GetStatus)
@@ -114,9 +130,13 @@ func main() {
 				)
 				jobsGroup.GET("/:id/proposals", jobHandler.ListProposals)
 
-				// Client actions
+				// Client accepts proposal
 				jobsGroup.POST("/:id/accept/:proposal_id", middleware.RequireRole(domain.RoleClient), jobHandler.AcceptProposal)
-				jobsGroup.POST("/:id/complete", middleware.RequireRole(domain.RoleClient), jobHandler.CompleteJob)
+
+				// Double Confirmation State Machine Endpoint (Both Client and Tech confirm)
+				jobsGroup.POST("/:id/confirm-status", jobHandler.ConfirmStatus)
+
+				// Reviews
 				jobsGroup.POST("/:id/review", middleware.RequireRole(domain.RoleClient), reviewHandler.SubmitReview)
 			}
 
@@ -150,8 +170,9 @@ func seedDatabase(userRepo *postgres.InMemoryUserRepo, jobRepo *postgres.InMemor
 		FullName:        "Lucía Fernández",
 		PhoneNumber:     "+5491144556677",
 		Role:            domain.RoleClient,
+		AccountStatus:   domain.AccountStatusActive,
 		TermsAcceptedAt: time.Now(),
-		TermsVersion:    "1.0-AR",
+		TermsVersion:    domain.DefaultTermsPlaceholder,
 		KYCStatus:       domain.KYCVerified,
 		IsActive:        true,
 	}
@@ -167,8 +188,9 @@ func seedDatabase(userRepo *postgres.InMemoryUserRepo, jobRepo *postgres.InMemor
 		FullName:        "Carlos Benítez",
 		PhoneNumber:     "+5491199887766",
 		Role:            domain.RoleTechnician,
+		AccountStatus:   domain.AccountStatusActive,
 		TermsAcceptedAt: time.Now(),
-		TermsVersion:    "1.0-AR",
+		TermsVersion:    domain.DefaultTermsPlaceholder,
 		KYCStatus:       domain.KYCVerified,
 		Trade:           &trade,
 		RatingAverage:   4.85,
@@ -187,8 +209,9 @@ func seedDatabase(userRepo *postgres.InMemoryUserRepo, jobRepo *postgres.InMemor
 		FullName:        "Esteban Rossi",
 		PhoneNumber:     "+5491133221100",
 		Role:            domain.RoleTechnician,
+		AccountStatus:   domain.AccountStatusActive,
 		TermsAcceptedAt: time.Now(),
-		TermsVersion:    "1.0-AR",
+		TermsVersion:    domain.DefaultTermsPlaceholder,
 		KYCStatus:       domain.KYCPending,
 		Trade:           &tradeGas,
 		RatingAverage:   0.00,
@@ -197,20 +220,27 @@ func seedDatabase(userRepo *postgres.InMemoryUserRepo, jobRepo *postgres.InMemor
 	}
 	_ = userRepo.Create(ctx, unverifiedTech)
 
-	// 4. Sample Job
+	// 4. Sample Job (Agendado with double confirmation)
 	jobID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	now := time.Now()
+	agendadoStatus := domain.StatusAgendado
 	sampleJob := &domain.Job{
 		ID:                    jobID,
 		ClientID:              clientID,
+		AssignedTechnicianID:  &techID,
 		Category:              domain.TradeElectricidad,
 		Title:                 "Instalación de disyuntor y recableado de cocina",
 		Description:           "Corte térmico frecuente al conectar horno eléctrico. Se necesita cambio de disyuntor diferencial y revisión térmica.",
 		GeneralLocality:       "Palermo Soho, CABA",
 		PhotosURLs:            []string{"https://images.unsplash.com/photo-1621905251189-08b45d6a269e"},
-		EstimatedScheduleDate: time.Now().Add(48 * time.Hour),
-		Status:                domain.JobStatusPublished,
-		CreatedAt:             time.Now(),
-		UpdatedAt:             time.Now(),
+		ScheduledAt:           now.Add(24 * time.Hour), // 24 hours ahead
+		Status:                domain.StatusAgendado,
+		ClientConfirmedStatus: &agendadoStatus,
+		TechConfirmedStatus:   &agendadoStatus,
+		ClientConfirmedAt:     &now,
+		TechConfirmedAt:       &now,
+		CreatedAt:             now,
+		UpdatedAt:             now,
 	}
 	_ = jobRepo.Create(ctx, sampleJob)
 
@@ -218,5 +248,5 @@ func seedDatabase(userRepo *postgres.InMemoryUserRepo, jobRepo *postgres.InMemor
 	fmt.Printf("   - Cliente: %s (%s)\n", client.Email, clientID)
 	fmt.Printf("   - Técnico Verificado: %s (%s)\n", tech.Email, techID)
 	fmt.Printf("   - Técnico Pendiente KYC: %s (%s)\n", unverifiedTech.Email, unverifiedTechID)
-	fmt.Printf("   - Trabajo de muestra: %s (%s)\n", sampleJob.Title, jobID)
+	fmt.Printf("   - Trabajo Agendado (Doble Confirmación): %s (%s)\n", sampleJob.Title, jobID)
 }

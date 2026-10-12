@@ -2,6 +2,7 @@ package ports
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/reparatutti/backend/internal/core/domain"
@@ -14,6 +15,10 @@ type UserRepository interface {
 	UpdateKYCStatus(ctx context.Context, id uuid.UUID, status domain.KYCStatus) error
 	UpdateRating(ctx context.Context, id uuid.UUID, newRating float64, newCount int) error
 	LogLegalConsent(ctx context.Context, userID uuid.UUID, action, ip, userAgent, version string) error
+	SuspendAccount(ctx context.Context, id uuid.UUID) error
+	DeleteAccount(ctx context.Context, id uuid.UUID) error
+	GetNotificationConfig(ctx context.Context, userID uuid.UUID) (*domain.NotificationConfig, error)
+	UpdateNotificationConfig(ctx context.Context, config *domain.NotificationConfig) error
 }
 
 type KYCRepository interface {
@@ -27,9 +32,14 @@ type JobRepository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Job, error)
 	ListAvailable(ctx context.Context, category *domain.TradeCategory, limit, offset int) ([]*domain.Job, error)
 	ListByClientID(ctx context.Context, clientID uuid.UUID) ([]*domain.Job, error)
+	ListByTechnicianID(ctx context.Context, techID uuid.UUID) ([]*domain.Job, error)
 	AssignTechnician(ctx context.Context, jobID, technicianID uuid.UUID) error
 	UpdateStatus(ctx context.Context, jobID uuid.UUID, status domain.JobStatus) error
+	UpdateConfirmationStatus(ctx context.Context, job *domain.Job) error
 	UpdateLocation(ctx context.Context, jobID uuid.UUID, address string, lat, lng float64) error
+	RecordTransition(ctx context.Context, transition *domain.JobStatusTransition) error
+	GetUpcomingJobsForReminder(ctx context.Context, windowStart, windowEnd time.Time, reminderType string) ([]*domain.Job, error)
+	MarkReminderSent(ctx context.Context, jobID uuid.UUID, reminderType string) error
 }
 
 type ProposalRepository interface {

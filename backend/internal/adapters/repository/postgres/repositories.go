@@ -77,17 +77,19 @@ func (r *InMemoryKYCRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status
 var _ ports.KYCRepository = (*InMemoryKYCRepo)(nil)
 
 // ============================================================================
-// IN-MEMORY JOB REPOSITORY
+// IN-MEMORY JOB REPOSITORY (With Double Confirmation & Reminder Search)
 // ============================================================================
 
 type InMemoryJobRepo struct {
-	mu   sync.RWMutex
-	jobs map[uuid.UUID]*domain.Job
+	mu          sync.RWMutex
+	jobs        map[uuid.UUID]*domain.Job
+	transitions []*domain.JobStatusTransition
 }
 
 func NewInMemoryJobRepo() *InMemoryJobRepo {
 	return &InMemoryJobRepo{
-		jobs: make(map[uuid.UUID]*domain.Job),
+		jobs:        make(map[uuid.UUID]*domain.Job),
+		transitions: make([]*domain.JobStatusTransition, 0),
 	}
 }
 
@@ -106,7 +108,7 @@ func (r *InMemoryJobRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Jo
 
 	job, exists := r.jobs[id]
 	if !exists {
-		return nil, errors.New("job not found")
+		return nil, errors.New("trabajo no encontrado")
 	}
 	copy := *job
 	return &copy, nil
@@ -118,7 +120,7 @@ func (r *InMemoryJobRepo) ListAvailable(ctx context.Context, category *domain.Tr
 
 	var result []*domain.Job
 	for _, j := range r.jobs {
-		if j.Status == domain.JobStatusPublished || j.Status == domain.JobStatusInBidding {
+		if j.Status == domain.StatusPendienteDeAceptacion {
 			if category == nil || j.Category == *category {
 				copy := *j
 				result = append(result, &copy)
@@ -126,7 +128,6 @@ func (r *InMemoryJobRepo) ListAvailable(ctx context.Context, category *domain.Tr
 		}
 	}
 
-	// Sort newest first
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].CreatedAt.After(result[j].CreatedAt)
 	})
@@ -145,6 +146,30 @@ func (r *InMemoryJobRepo) ListByClientID(ctx context.Context, clientID uuid.UUID
 			result = append(result, &copy)
 		}
 	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].ScheduledAt.Before(result[j].ScheduledAt)
+	})
+
+	return result, nil
+}
+
+func (r *InMemoryJobRepo) ListByTechnicianID(ctx context.Context, techID uuid.UUID) ([]*domain.Job, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []*domain.Job
+	for _, j := range r.jobs {
+		if j.AssignedTechnicianID != nil && *j.AssignedTechnicianID == techID {
+			copy := *j
+			result = append(result, &copy)
+		}
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].ScheduledAt.Before(result[j].ScheduledAt)
+	})
+
 	return result, nil
 }
 
@@ -154,10 +179,9 @@ func (r *InMemoryJobRepo) AssignTechnician(ctx context.Context, jobID, technicia
 
 	job, exists := r.jobs[jobID]
 	if !exists {
-		return errors.New("job not found")
+		return errors.New("trabajo no encontrado")
 	}
 	job.AssignedTechnicianID = &technicianID
-	job.Status = domain.JobStatusAssigned
 	job.UpdatedAt = time.Now()
 	return nil
 }
@@ -168,14 +192,29 @@ func (r *InMemoryJobRepo) UpdateStatus(ctx context.Context, jobID uuid.UUID, sta
 
 	job, exists := r.jobs[jobID]
 	if !exists {
-		return errors.New("job not found")
+		return errors.New("trabajo no encontrado")
 	}
 	job.Status = status
-	job.UpdatedAt = time.Now()
-	if status == domain.JobStatusCompleted {
-		now := time.Now()
+	now := time.Now()
+	job.UpdatedAt = now
+	switch status {
+	case domain.StatusFinalizado:
 		job.CompletedAt = &now
+	case domain.StatusCancelado:
+		job.CancelledAt = &now
 	}
+	return nil
+}
+
+func (r *InMemoryJobRepo) UpdateConfirmationStatus(ctx context.Context, job *domain.Job) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	existing, exists := r.jobs[job.ID]
+	if !exists {
+		return errors.New("trabajo no encontrado")
+	}
+	*existing = *job
 	return nil
 }
 
@@ -185,12 +224,61 @@ func (r *InMemoryJobRepo) UpdateLocation(ctx context.Context, jobID uuid.UUID, a
 
 	job, exists := r.jobs[jobID]
 	if !exists {
-		return errors.New("job not found")
+		return errors.New("trabajo no encontrado")
 	}
 	job.FullAddress = &address
 	job.LocationLatitude = &lat
 	job.LocationLongitude = &lng
 	job.UpdatedAt = time.Now()
+	return nil
+}
+
+func (r *InMemoryJobRepo) RecordTransition(ctx context.Context, transition *domain.JobStatusTransition) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	copy := *transition
+	r.transitions = append(r.transitions, &copy)
+	return nil
+}
+
+func (r *InMemoryJobRepo) GetUpcomingJobsForReminder(ctx context.Context, windowStart, windowEnd time.Time, reminderType string) ([]*domain.Job, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var results []*domain.Job
+	for _, j := range r.jobs {
+		if j.Status == domain.StatusAgendado {
+			if (j.ScheduledAt.After(windowStart) || j.ScheduledAt.Equal(windowStart)) &&
+				(j.ScheduledAt.Before(windowEnd) || j.ScheduledAt.Equal(windowEnd)) {
+				if reminderType == "24h" && j.Reminder24hSentAt == nil {
+					copy := *j
+					results = append(results, &copy)
+				} else if reminderType == "2h" && j.Reminder2hSentAt == nil {
+					copy := *j
+					results = append(results, &copy)
+				}
+			}
+		}
+	}
+	return results, nil
+}
+
+func (r *InMemoryJobRepo) MarkReminderSent(ctx context.Context, jobID uuid.UUID, reminderType string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	job, exists := r.jobs[jobID]
+	if !exists {
+		return errors.New("trabajo no encontrado")
+	}
+	now := time.Now()
+	switch reminderType {
+	case "24h":
+		job.Reminder24hSentAt = &now
+	case "2h":
+		job.Reminder2hSentAt = &now
+	}
 	return nil
 }
 
@@ -376,7 +464,7 @@ func (r *InMemoryReviewRepo) GetByJobID(ctx context.Context, jobID uuid.UUID) (*
 
 	revID, exists := r.byJob[jobID]
 	if !exists {
-		return nil, errors.New("review not found")
+		return nil, errors.New("review no encontrada")
 	}
 	copy := *r.reviews[revID]
 	return &copy, nil
