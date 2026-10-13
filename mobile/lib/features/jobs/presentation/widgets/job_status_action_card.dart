@@ -60,14 +60,14 @@ class JobStatusActionCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: isDark ? AppColors.surfaceDark : AppColors.pureWhite,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: isDark ? AppColors.borderDark : AppColors.borderLight,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 10,
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
+            blurRadius: 12,
             offset: const Offset(0, 4),
           ),
         ],
@@ -79,22 +79,16 @@ class JobStatusActionCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Expanded(
-                child: Row(
-                  children: [
-                    Icon(Icons.sync_alt_rounded, size: 18, color: AppColors.mustardLight),
-                    SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        'Regla de Doble Confirmación',
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                      ),
-                    ),
-                  ],
-                ),
+              const Row(
+                children: [
+                  Icon(Icons.sync_alt_rounded, size: 20, color: AppColors.mustardLight),
+                  SizedBox(width: 8),
+                  Text(
+                    'Regla de Doble Confirmación',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
@@ -105,7 +99,7 @@ class JobStatusActionCard extends StatelessWidget {
                   _formatStatusName(currentStatus),
                   style: TextStyle(
                     color: statusColor,
-                    fontSize: 11,
+                    fontSize: 13,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -132,7 +126,7 @@ class JobStatusActionCard extends StatelessWidget {
                   ),
                 ),
                 Container(
-                  height: 36,
+                  height: 40,
                   width: 1,
                   color: isDark ? AppColors.borderDark : AppColors.borderLight,
                 ),
@@ -152,23 +146,59 @@ class JobStatusActionCard extends StatelessWidget {
           // Clarification text
           Text(
             clientConfirmed && techConfirmed
-                ? '✅ Ambas partes han confirmado. El estado global ha transicionado oficialmente.'
+                ? '✅ Ambas partes han confirmado. Transición oficial completada.'
                 : '⏳ Para transicionar el estado, ambas partes deben confirmar la misma acción.',
             style: TextStyle(
-              fontSize: 12,
+              fontSize: 13,
               color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
             ),
           ),
           const SizedBox(height: 14),
 
-          // Action Buttons depending on current state
-          if (currentStatus == 'pendiente_de_aceptacion' && !userHasConfirmed) ...[
+          // Finalized State: Warranty and Payment Shield
+          if (currentStatus == 'finalizado') ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF14291B) : const Color(0xFFECFDF5),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isDark ? const Color(0xFF047857) : const Color(0xFFA7F3D0),
+                ),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.verified_user_rounded, color: AppColors.success, size: 24),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '🛡️ Garantía Reparatutti 30 Días ACTIVA',
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.success,
+                          ),
+                        ),
+                        Text(
+                          'Pago liberado vía MercadoPago Escrow. Certificado: REP-30D-2026',
+                          style: TextStyle(fontSize: 13, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else if (currentStatus == 'pendiente_de_aceptacion' && !userHasConfirmed) ...[
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
                 onPressed: onConfirmAgendado,
                 icon: const Icon(Icons.event_available_rounded, size: 18),
-                label: const Text('Confirmar Agendamiento'),
+                label: const Text('Confirmar Agendamiento', style: TextStyle(fontSize: 14)),
               ),
             ),
           ] else if (currentStatus == 'agendado') ...[
@@ -178,7 +208,7 @@ class JobStatusActionCard extends StatelessWidget {
                   child: OutlinedButton.icon(
                     onPressed: onConfirmCancelado,
                     icon: const Icon(Icons.close_rounded, size: 16, color: AppColors.danger),
-                    label: const Text('Cancelar', style: TextStyle(color: AppColors.danger)),
+                    label: const Text('Cancelar', style: TextStyle(color: AppColors.danger, fontSize: 14)),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -186,7 +216,10 @@ class JobStatusActionCard extends StatelessWidget {
                   child: ElevatedButton.icon(
                     onPressed: onConfirmFinalizado,
                     icon: const Icon(Icons.check_circle_outline_rounded, size: 16),
-                    label: const Text('Finalizar'),
+                    label: Text(
+                      isClient ? 'Pagar y Finalizar' : 'Confirmar Fin',
+                      style: const TextStyle(fontSize: 14),
+                    ),
                   ),
                 ),
               ],
@@ -209,7 +242,7 @@ class JobStatusActionCard extends StatelessWidget {
                   SizedBox(width: 8),
                   Text(
                     'Tu confirmación fue enviada. Esperando a la otra parte...',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                   ),
                 ],
               ),
@@ -234,7 +267,7 @@ class JobStatusActionCard extends StatelessWidget {
             Text(
               role,
               style: TextStyle(
-                fontSize: 12,
+                fontSize: 13,
                 fontWeight: isCurrentUser ? FontWeight.bold : FontWeight.w500,
                 color: isCurrentUser
                     ? (isDark ? AppColors.mustardDark : AppColors.mustardLight)
@@ -243,7 +276,7 @@ class JobStatusActionCard extends StatelessWidget {
             ),
             if (isCurrentUser) ...[
               const SizedBox(width: 4),
-              const Text('(Tú)', style: TextStyle(fontSize: 10, color: Colors.grey)),
+              const Text('(Tú)', style: TextStyle(fontSize: 13, color: Colors.grey)),
             ],
           ],
         ),
@@ -260,7 +293,7 @@ class JobStatusActionCard extends StatelessWidget {
             Text(
               confirmed ? 'Confirmado' : 'Pendiente',
               style: TextStyle(
-                fontSize: 12,
+                fontSize: 13,
                 fontWeight: FontWeight.w600,
                 color: confirmed ? AppColors.success : Colors.grey,
               ),

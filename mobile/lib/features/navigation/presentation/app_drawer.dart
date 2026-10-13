@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../../core/services/account_service.dart';
+import '../../../../core/services/secure_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
 
-class AppDrawer extends StatelessWidget {
+class AppDrawer extends ConsumerWidget {
   final bool isTechnician;
   final VoidCallback onToggleRole;
   final Function(String category)? onSelectTradeFilter;
@@ -14,7 +17,7 @@ class AppDrawer extends StatelessWidget {
     this.onSelectTradeFilter,
   });
 
-  void _showProfileModal(BuildContext context) {
+  void _showProfileModal(BuildContext context, WidgetRef ref) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     showModalBottomSheet(
       context: context,
@@ -156,16 +159,16 @@ class AppDrawer extends StatelessWidget {
               ),
               const Spacer(),
 
-              // Botón de Suspensión / Eliminación de cuenta (Mandatorio para App Store)
+              // Botón de Eliminación de cuenta (Mandatorio para Apple App Store & Google Play)
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
                   onPressed: () {
                     Navigator.of(ctx).pop();
-                    _showAccountSecurityDialog(context);
+                    _showAccountSecurityDialog(context, ref);
                   },
                   icon: const Icon(Icons.delete_forever_rounded, color: AppColors.danger, size: 18),
-                  label: const Text('Suspensión / Eliminación de Cuenta', style: TextStyle(color: AppColors.danger)),
+                  label: const Text('Eliminar Cuenta (App Store & GDPR)', style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.bold)),
                   style: OutlinedButton.styleFrom(
                     side: const BorderSide(color: AppColors.danger),
                   ),
@@ -178,7 +181,7 @@ class AppDrawer extends StatelessWidget {
     );
   }
 
-  void _showAccountSecurityDialog(BuildContext context) {
+  void _showAccountSecurityDialog(BuildContext context, WidgetRef ref) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -190,9 +193,9 @@ class AppDrawer extends StatelessWidget {
           ],
         ),
         content: const Text(
-          'Conforme a las normativas de privacidad y directrices de App Store (Guideline 5.1.1):\n\n'
+          'Conforme a las directrices de Apple App Store (Guideline 5.1.1) y Google Play Data Safety:\n\n'
           '• Suspender cuenta: Desactiva tu perfil temporalmente. Podés reactivarlo contactando a soporte.\n\n'
-          '• Eliminar cuenta: Borra tus datos personales, historial de direcciones y credenciales de forma permanente.',
+          '• Eliminar cuenta: Anonimiza y purga definitivamente tus datos personales, direcciones y credenciales de acceso tanto del servidor como del dispositivo.',
           style: TextStyle(fontSize: 13, height: 1.4),
         ),
         actions: [
@@ -201,11 +204,15 @@ class AppDrawer extends StatelessWidget {
             child: const Text('Cancelar'),
           ),
           OutlinedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.of(ctx).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Cuenta suspendida con éxito.')),
-              );
+              await ref.read(accountServiceProvider).suspendAccount();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Cuenta suspendida con éxito. Sesión cerrada.')),
+                );
+                context.go('/login');
+              }
             },
             child: const Text('Suspender'),
           ),
@@ -213,14 +220,60 @@ class AppDrawer extends StatelessWidget {
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger, foregroundColor: Colors.white),
             onPressed: () {
               Navigator.of(ctx).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Solicitud de eliminación definitiva procesada.'),
-                  backgroundColor: AppColors.danger,
-                ),
-              );
+              _confirmDeleteAccountFlow(context, ref);
             },
             child: const Text('Eliminar Definitivamente'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDeleteAccountFlow(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.delete_forever_rounded, color: AppColors.danger),
+            SizedBox(width: 8),
+            Text('Confirmar Eliminación'),
+          ],
+        ),
+        content: const Text(
+          '¿Estás seguro/a de que deseas eliminar tu cuenta?\n\n'
+          'Esta acción es IRREVERSIBLE. Tus datos personales y de contacto serán eliminados y anonimizados de inmediato en cumplimiento de GDPR y las normativas de la App Store.',
+          style: TextStyle(fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.danger,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () async {
+              Navigator.of(dialogCtx).pop();
+
+              // Trigger backend deletion & session wipe
+              await ref.read(accountServiceProvider).deleteAccount();
+
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Cuenta eliminada y anonimizada. Tu sesión ha sido cerrada.'),
+                    backgroundColor: AppColors.danger,
+                  ),
+                );
+                // Redirect user to login screen
+                context.go('/login');
+              }
+            },
+            child: const Text('Sí, Eliminar Cuenta'),
           ),
         ],
       ),
@@ -420,7 +473,7 @@ class AppDrawer extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Drawer(
@@ -495,7 +548,7 @@ class AppDrawer extends StatelessWidget {
               subtitle: Text(isTechnician ? 'Scoring, estados y gestión' : 'Datos y estados'),
               onTap: () {
                 Navigator.of(context).pop();
-                _showProfileModal(context);
+                _showProfileModal(context, ref);
               },
             ),
 
@@ -529,6 +582,17 @@ class AppDrawer extends StatelessWidget {
               onTap: () {
                 Navigator.of(context).pop();
                 context.push('/kyc?role=${isTechnician ? "technician" : "client"}');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.logout_rounded, color: AppColors.danger),
+              title: const Text('Cerrar Sesión', style: TextStyle(color: AppColors.danger)),
+              onTap: () async {
+                Navigator.of(context).pop();
+                await ref.read(secureStorageServiceProvider).clearAuthSession();
+                if (context.mounted) {
+                  context.go('/login');
+                }
               },
             ),
           ],

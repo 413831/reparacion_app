@@ -1,0 +1,121 @@
+# ==============================================================================
+# REPARATUTTI REPOSITORY ROOT - SECURITY & HYGIENE .GITIGNORE
+# Covers Go Cloud-Native Backend, Flutter Mobile App (iOS/Android) & IDEs
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. CRITICAL SECRETS & ENVIRONMENT VARIABLES (NEVER COMMIT)
+# ------------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.env
+*.pem
+*.key
+*.cert
+*.crt
+*.p12
+*.pfx
+secrets/
+credentials/
+jwt_secret*
+
+# ------------------------------------------------------------------------------
+# 2. MOBILE CLOUD CONFIGURATIONS & SERVICE ACCOUNTS
+# ------------------------------------------------------------------------------
+# Firebase / Google Services
+google-services.json
+**/android/**/google-services.json
+GoogleService-Info.plist
+**/ios/**/GoogleService-Info.plist
+firebase_app_id_file.json
+
+# ------------------------------------------------------------------------------
+# 3. ANDROID SIGNING KEYS & KEYSTORES
+# ------------------------------------------------------------------------------
+key.properties
+**/android/key.properties
+*.jks
+*.keystore
+local.properties
+**/android/local.properties
+.gradle/
+**/android/.gradle/
+android/app/src/release/res/values/secrets.xml
+
+# ------------------------------------------------------------------------------
+# 4. IOS SIGNING & CERTIFICATES
+# ------------------------------------------------------------------------------
+*.mobileprovision
+*.cer
+*.certSigningRequest
+ExportOptions.plist
+Pods/
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/.last_build_id
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+
+# ------------------------------------------------------------------------------
+# 5. GO BACKEND BUILD ARTIFACTS & BINARIES
+# ------------------------------------------------------------------------------
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+backend/bin/
+backend/dist/
+backend/server.exe
+server.exe
+*.test
+*.out
+*.prof
+
+# ------------------------------------------------------------------------------
+# 6. FLUTTER / DART RUNTIME & BUILD DIRECTORIES
+# ------------------------------------------------------------------------------
+.dart_tool/
+**/.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+build/
+**/build/
+coverage/
+**/coverage/
+doc/api/
+app.*.symbols
+app.*.map.json
+
+# ------------------------------------------------------------------------------
+# 7. IDE, OS & EDITOR METADATA
+# ------------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+.idea/
+**/.idea/
+.vscode/
+**/.vscode/
+*.iml
+**/*.iml
+*.ipr
+*.iws
+
+# ------------------------------------------------------------------------------
+# 8. LOGS & TEMPORARY FILES
+# ------------------------------------------------------------------------------
+*.log
+*.tmp
+*.bak
+*.swp
+*~

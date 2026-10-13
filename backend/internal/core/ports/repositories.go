@@ -62,3 +62,11 @@ type ReviewRepository interface {
 	GetByJobID(ctx context.Context, jobID uuid.UUID) (*domain.Review, error)
 	ListByTechnicianID(ctx context.Context, techID uuid.UUID, limit, offset int) ([]*domain.Review, error)
 }
+
+type CatalogPriceRepository interface {
+	Create(ctx context.Context, price *domain.CatalogPrice) error
+	ListActive(ctx context.Context) ([]*domain.CatalogPrice, error)
+	GetByCategory(ctx context.Context, category domain.TradeCategory) ([]*domain.CatalogPrice, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.CatalogPrice, error)
+}
+

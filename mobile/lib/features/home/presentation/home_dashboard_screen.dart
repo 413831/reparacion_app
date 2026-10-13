@@ -4,8 +4,10 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/shimmer_loader.dart';
 import '../../navigation/presentation/app_drawer.dart';
 import '../../jobs/presentation/widgets/job_status_action_card.dart';
-import '../../jobs/presentation/widgets/job_summary_card.dart';
+import '../../jobs/presentation/widgets/payment_guarantee_bottom_sheet.dart';
 import '../../jobs/presentation/widgets/quick_request_wizard_modal.dart';
+import 'widgets/smart_triage_input.dart';
+import 'widgets/benchmark_price_card.dart';
 
 class HomeDashboardScreen extends StatefulWidget {
   const HomeDashboardScreen({super.key});
@@ -15,19 +17,22 @@ class HomeDashboardScreen extends StatefulWidget {
 }
 
 class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
+  final GlobalKey<SmartTriageInputState> _smartTriageKey = GlobalKey<SmartTriageInputState>();
+
   bool _isTechnician = false;
   bool _isLoading = false;
   String _selectedCategory = 'Todos';
-  String _searchQuery = '';
-  final TextEditingController _searchController = TextEditingController();
 
   // State machine simulation for double confirmation
   String _jobStatus = 'pendiente_de_aceptacion';
   bool _clientConfirmed = false;
   bool _techConfirmed = false;
+  double _activeJobPrice = 28000.0;
+  String _activeJobTitle = 'Reparación de canilla / Grifería';
 
   final List<Map<String, dynamic>> _categories = [
     {'name': 'Todos', 'icon': Icons.apps_rounded},
+    {'name': 'Plomería', 'icon': Icons.water_drop_rounded},
     {'name': 'Electricidad', 'icon': Icons.bolt_rounded},
     {'name': 'Pintura', 'icon': Icons.format_paint_rounded},
     {'name': 'Gas', 'icon': Icons.local_fire_department_rounded},
@@ -36,36 +41,74 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     {'name': 'Reparación Edilicia', 'icon': Icons.home_repair_service_rounded},
   ];
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
+
 
   void _triggerRefreshSimulation() {
     setState(() => _isLoading = true);
-    Future.delayed(const Duration(milliseconds: 900), () {
+    Future.delayed(const Duration(milliseconds: 700), () {
       if (mounted) setState(() => _isLoading = false);
     });
   }
 
+  void _handleSmartRequestCreated(String title, String category, double estimatedPrice) {
+    setState(() {
+      _activeJobTitle = title;
+      _activeJobPrice = estimatedPrice;
+      _jobStatus = 'pendiente_de_aceptacion';
+      _clientConfirmed = false;
+      _techConfirmed = false;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '¡Solicitud "$title" ($category) publicada con Precio Estimado de \$${estimatedPrice.toStringAsFixed(0)} ARS!',
+          style: const TextStyle(fontSize: 13),
+        ),
+        backgroundColor: AppColors.success,
+      ),
+    );
+  }
+
   void _openQuickRequestWizard() {
     QuickRequestWizardModal.show(context, (jobData) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('¡Trabajo "${jobData['title']}" publicado exitosamente!'),
-          backgroundColor: AppColors.success,
-        ),
-      );
       setState(() {
+        _activeJobTitle = jobData['title'] ?? 'Reparación en el hogar';
         _jobStatus = 'pendiente_de_aceptacion';
         _clientConfirmed = false;
         _techConfirmed = false;
       });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '¡Trabajo "${jobData['title']}" publicado exitosamente!',
+            style: const TextStyle(fontSize: 13),
+          ),
+          backgroundColor: AppColors.success,
+        ),
+      );
     });
   }
 
   void _handleConfirmStatus(String targetStatus) {
+    // If client is confirming 'finalizado', trigger the MercadoPago BottomSheet!
+    if (!_isTechnician && targetStatus == 'finalizado' && !_clientConfirmed) {
+      PaymentGuaranteeBottomSheet.show(
+        context: context,
+        amount: _activeJobPrice,
+        technicianName: 'Carlos Benítez',
+        jobTitle: _activeJobTitle,
+        onPaymentConfirmed: () {
+          _executeStatusConfirmation('finalizado');
+        },
+      );
+      return;
+    }
+
+    _executeStatusConfirmation(targetStatus);
+  }
+
+  void _executeStatusConfirmation(String targetStatus) {
     setState(() {
       if (_isTechnician) {
         _techConfirmed = true;
@@ -76,16 +119,25 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       // Check double confirmation rule
       if (_clientConfirmed && _techConfirmed) {
         _jobStatus = targetStatus;
+        final isFin = targetStatus == 'finalizado';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('¡Doble confirmación exitosa! Estado global actualizado a: $targetStatus'),
+            content: Text(
+              isFin
+                  ? '¡Doble confirmación completada! Pago liberado y Garantía Reparatutti 30 Días ACTIVADA.'
+                  : '¡Doble confirmación exitosa! Estado global actualizado a: $targetStatus',
+              style: const TextStyle(fontSize: 13),
+            ),
             backgroundColor: AppColors.success,
           ),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Confirmación registrada. Esperando a la otra parte para actualizar.'),
+            content: Text(
+              'Confirmación registrada. Esperando a la otra parte para actualizar.',
+              style: TextStyle(fontSize: 13),
+            ),
             backgroundColor: AppColors.warning,
           ),
         );
@@ -123,7 +175,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               child: Text(
                 _isTechnician ? 'Reparatutti Pro' : 'Reparatutti',
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.5),
+                style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.5, fontSize: 18),
               ),
             ),
           ],
@@ -135,7 +187,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             onPressed: _triggerRefreshSimulation,
           ),
           IconButton(
-            tooltip: 'Alternar Rol',
+            tooltip: 'Alternar Rol (Cliente / Técnico)',
             icon: Icon(_isTechnician ? Icons.engineering_rounded : Icons.person_rounded),
             onPressed: () {
               setState(() => _isTechnician = !_isTechnician);
@@ -145,11 +197,11 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       ),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.symmetric(vertical: 8),
           children: [
-            // Mode Banner
+            // Mode Banner with quick switcher
             _buildModeBanner(isDark),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
 
             // CLIENT VIEW vs TECHNICIAN VIEW
             if (!_isTechnician) ...[
@@ -160,12 +212,28 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
 
             const SizedBox(height: 16),
 
-            // Interactive Double Confirmation Card Demonstration
+            // Active Order Section (Double Confirmation card)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              child: Text(
-                'Orden en Curso: Instalación de disyuntor',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Seguimiento en Vivo: $_activeJobTitle',
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '\$${_activeJobPrice.toStringAsFixed(0)} ARS',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14.5,
+                      color: isDark ? AppColors.accentYellow : AppColors.mustardLight,
+                    ),
+                  ),
+                ],
               ),
             ),
             JobStatusActionCard(
@@ -177,6 +245,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               onConfirmFinalizado: () => _handleConfirmStatus('finalizado'),
               onConfirmCancelado: () => _handleConfirmStatus('cancelado'),
             ),
+            const SizedBox(height: 20),
           ],
         ),
       ),
@@ -189,13 +258,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: isDark ? AppColors.borderDark : AppColors.borderLight),
       ),
       child: Row(
         children: [
           Icon(
-            _isTechnician ? Icons.engineering_rounded : Icons.home_repair_service_rounded,
+            _isTechnician ? Icons.engineering_rounded : Icons.person_pin_rounded,
             size: 20,
             color: isDark ? AppColors.mustardDark : AppColors.mustardLight,
           ),
@@ -203,9 +272,25 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           Expanded(
             child: Text(
               _isTechnician
-                  ? 'Modo Técnico: Descubrí solicitudes y respondé cotizaciones'
-                  : 'Modo Cliente: Agendá reparaciones en 3 simples pasos',
-              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                  ? 'Modo Profesional: Descubrí trabajos y aplicá a precios sugeridos.'
+                  : 'Modo Cliente: Smart Triage, precios promedio transparentes y garantía.',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+          ),
+          TextButton(
+            onPressed: () => setState(() => _isTechnician = !_isTechnician),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: Text(
+              _isTechnician ? 'Cambiar a Cliente' : 'Cambiar a Técnico',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: isDark ? AppColors.mustardDark : AppColors.mustardLight,
+              ),
             ),
           ),
         ],
@@ -214,69 +299,52 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   }
 
   // ==========================================================================
-  // CLIENTE: Foco 100% en agendamiento ultra rápido
+  // CLIENT VIEW: Smart Triage Central + Benchmark Prices + Agenda
   // ==========================================================================
   Widget _buildClientHomeView(bool isDark) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Prominent CTA "Pedir trabajo"
-        Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16),
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: isDark
-                  ? [const Color(0xFF332608), const Color(0xFF1F1A07)]
-                  : [const Color(0xFFFEF3C7), const Color(0xFFFFFBEB)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: isDark ? const Color(0xFF664D10) : const Color(0xFFFDE68A),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        // 1. Central Smart Triage Input Component
+        SmartTriageInput(
+          key: _smartTriageKey,
+          onRequestCreated: _handleSmartRequestCreated,
+        ),
+        const SizedBox(height: 12),
+
+        // 2. Benchmark Average Price Cards List
+        BenchmarkPriceCardList(
+          onSelectPriceItem: (item) {
+            _smartTriageKey.currentState?.setQueryText(item.title);
+          },
+        ),
+        const SizedBox(height: 14),
+
+        // 3. Quick Agenda & Wizard Access Bar
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
             children: [
-              const Text(
-                '¿Necesitás una reparación en tu hogar?',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.4),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Publicá tu solicitud y recibí presupuestos de técnicos verificados en minutos.',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: isDark ? Colors.grey[300] : Colors.grey[700],
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _openQuickRequestWizard,
+                  icon: const Icon(Icons.tune_rounded, size: 16),
+                  label: const Text('Asistente Manual', style: TextStyle(fontSize: 13)),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
                 ),
               ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _openQuickRequestWizard,
-                      icon: const Icon(Icons.add_task_rounded, size: 20),
-                      label: const Text('Pedir trabajo', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                    ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _showAgendaDialog(context),
+                  icon: const Icon(Icons.calendar_today_rounded, size: 16),
+                  label: const Text('Ver Mi Agenda', style: TextStyle(fontSize: 13)),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  const SizedBox(width: 10),
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      _showAgendaDialog(context);
-                    },
-                    icon: const Icon(Icons.calendar_today_rounded, size: 16),
-                    label: const Text('Agenda'),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                    ),
-                  ),
-                ],
+                ),
               ),
             ],
           ),
@@ -286,12 +354,66 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   }
 
   // ==========================================================================
-  // TÉCNICO: Foco en responder y atender demanda
+  // TECHNICIAN VIEW: Verified Shield + Instant Conversion Feed + 1:1 Chat
   // ==========================================================================
   Widget _buildTechnicianHomeView(bool isDark) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Professional Verified Shield Header
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF192518) : const Color(0xFFF0FDF4),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isDark ? const Color(0xFF047857) : const Color(0xFF86EFAC),
+            ),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.shield_rounded, color: AppColors.success, size: 26),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: const [
+                        Text(
+                          'Carlos Benítez',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5),
+                        ),
+                        SizedBox(width: 6),
+                        Text(
+                          '• Profesional Verificado',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.success,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: const [
+                        Icon(Icons.star_rounded, size: 16, color: AppColors.accentYellow),
+                        SizedBox(width: 2),
+                        Text(
+                          '4.85 / 5.00 (14 reseñas) • Plomería & Electricidad',
+                          style: TextStyle(fontSize: 13, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+
         // Shortcuts: "Agenda" y "Chats" activos
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0),
@@ -302,21 +424,21 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   onTap: () => _showAgendaDialog(context),
                   borderRadius: BorderRadius.circular(14),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
                     decoration: BoxDecoration(
                       color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(color: isDark ? AppColors.borderDark : AppColors.borderLight),
                     ),
-                    child: Row(
+                    child: const Row(
                       children: [
-                        const Icon(Icons.calendar_month_rounded, color: AppColors.mustardLight, size: 22),
-                        const SizedBox(width: 10),
+                        Icon(Icons.calendar_month_rounded, color: AppColors.mustardLight, size: 20),
+                        SizedBox(width: 10),
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-                          children: const [
+                          children: [
                             Text('Mi Agenda', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                            Text('1 programado', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                            Text('1 programado', style: TextStyle(fontSize: 13, color: Colors.grey)),
                           ],
                         ),
                       ],
@@ -330,21 +452,21 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   onTap: () => context.push('/chat/44444444-4444-4444-4444-444444444444'),
                   borderRadius: BorderRadius.circular(14),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
                     decoration: BoxDecoration(
                       color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(color: isDark ? AppColors.borderDark : AppColors.borderLight),
                     ),
-                    child: Row(
+                    child: const Row(
                       children: [
-                        const Icon(Icons.chat_bubble_outline_rounded, color: AppColors.mustardLight, size: 22),
-                        const SizedBox(width: 10),
+                        Icon(Icons.chat_bubble_outline_rounded, color: AppColors.mustardLight, size: 20),
+                        SizedBox(width: 10),
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-                          children: const [
+                          children: [
                             Text('Chats Activos', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                            Text('Responder al instante', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                            Text('Lucía Fernández (1)', style: TextStyle(fontSize: 13, color: Colors.grey)),
                           ],
                         ),
                       ],
@@ -357,34 +479,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         ),
         const SizedBox(height: 14),
 
-        // Search Bar in real time
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0),
-          child: TextField(
-            controller: _searchController,
-            decoration: InputDecoration(
-              hintText: 'Buscar trabajos por palabra clave o zona...',
-              prefixIcon: const Icon(Icons.search_rounded),
-              suffixIcon: _searchQuery.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.clear_rounded),
-                      onPressed: () {
-                        setState(() {
-                          _searchController.clear();
-                          _searchQuery = '';
-                        });
-                      },
-                    )
-                  : null,
-            ),
-            onChanged: (val) {
-              setState(() => _searchQuery = val);
-            },
-          ),
-        ),
-        const SizedBox(height: 12),
-
-        // Horizontal Category Chips
+        // Category Filter Chips
         SizedBox(
           height: 38,
           child: ListView.separated(
@@ -409,34 +504,192 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 labelStyle: TextStyle(
                   color: isSelected ? AppColors.pureBlack : null,
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                  fontSize: 12,
+                  fontSize: 13,
                 ),
                 onSelected: (_) => setState(() => _selectedCategory = cat['name'] as String),
               );
             },
           ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 12),
 
-        // Available Job Feed Item
+        // Technician Feed: Available Jobs with Instant Accept vs Custom Proposal
         if (_isLoading) ...[
           const JobCardSkeleton(),
         ] else ...[
-          JobSummaryCard(
-            tradeTitle: 'Instalación de disyuntor y recableado',
-            status: 'agendado',
-            scheduledDateText: 'Martes 14 Oct • 10:00 hs',
-            addressText: 'Honduras 4820, Palermo Soho, CABA',
-            budgetEstimateText: r'$45.000',
-            actionButtonText: 'Aceptar Trabajo',
-            onActionPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Trabajo aceptado exitosamente.')),
-              );
-            },
+          // Job 1: Gotea la canilla (Smart Triage with Suggested Price)
+          _buildAvailableJobCard(
+            title: 'Gotea la canilla de la cocina',
+            category: 'Plomería',
+            locality: 'Belgrano, CABA',
+            timeAgo: 'Hace 15 min',
+            suggestedPrice: 28000.0,
+            hasInstantAccept: true,
+            isDark: isDark,
+          ),
+          const SizedBox(height: 10),
+          // Job 2: Cambio de disyuntor
+          _buildAvailableJobCard(
+            title: 'Cambio de disyuntor diferencial',
+            category: 'Electricidad',
+            locality: 'Palermo Soho, CABA',
+            timeAgo: 'Hace 45 min',
+            suggestedPrice: 32000.0,
+            hasInstantAccept: true,
+            isDark: isDark,
           ),
         ],
       ],
+    );
+  }
+
+  Widget _buildAvailableJobCard({
+    required String title,
+    required String category,
+    required String locality,
+    required String timeAgo,
+    required double suggestedPrice,
+    required bool hasInstantAccept,
+    required bool isDark,
+  }) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.surfaceDark : AppColors.pureWhite,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: isDark ? AppColors.borderDark : AppColors.borderLight),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF2C2412) : const Color(0xFFFEF3C7),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  category,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? AppColors.accentYellow : const Color(0xFF92400E),
+                  ),
+                ),
+              ),
+              Text(
+                timeAgo,
+                style: const TextStyle(fontSize: 13, color: Colors.grey),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            title,
+            style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              const Icon(Icons.location_on_rounded, size: 15, color: Colors.grey),
+              const SizedBox(width: 4),
+              Text(
+                locality,
+                style: const TextStyle(fontSize: 13, color: Colors.grey),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Suggested Price Callout
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF141414) : const Color(0xFFF9FAFB),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Precio Sugerido por Cliente:',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                ),
+                Text(
+                  '\$${suggestedPrice.toStringAsFixed(0)} ARS',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                    color: isDark ? AppColors.accentYellow : AppColors.mustardLight,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // Two Action Choices: Instant conversion vs Custom Quote
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'Presupuesto a medida enviado para "$title".',
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Presupuesto a Medida', style: TextStyle(fontSize: 13)),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.mustardLight,
+                    foregroundColor: AppColors.pureBlack,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _activeJobTitle = title;
+                      _activeJobPrice = suggestedPrice;
+                      _jobStatus = 'agendado';
+                      _techConfirmed = true;
+                      _clientConfirmed = true;
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          '¡Aceptación instantánea confirmada! Estado actualizado a "Agendado".',
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                        backgroundColor: AppColors.success,
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.flash_on_rounded, size: 16),
+                  label: const Text('Aceptar Sugerido', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -448,7 +701,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           children: [
             Icon(Icons.calendar_month_rounded, color: AppColors.mustardLight),
             SizedBox(width: 8),
-            Text('Agenda Sincronizada'),
+            Text('Agenda Sincronizada', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           ],
         ),
         content: Column(
@@ -467,15 +720,15 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: AppColors.info.withValues(alpha: 0.3)),
               ),
-              child: const Column(
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Instalación de disyuntor', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  SizedBox(height: 4),
-                  Text('Fecha: Mañana a las 10:00 hs', style: TextStyle(fontSize: 12)),
-                  Text('Estado: agendado (Doble confirmación OK)', style: TextStyle(fontSize: 11, color: AppColors.info)),
-                  SizedBox(height: 6),
-                  Text('🔔 Recordatorios programados: 24h antes y 2h antes', style: TextStyle(fontSize: 10.5, color: Colors.grey)),
+                  Text(_activeJobTitle, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
+                  const SizedBox(height: 4),
+                  const Text('Fecha: Mañana a las 10:00 hs', style: TextStyle(fontSize: 13)),
+                  Text('Estado: $_jobStatus', style: const TextStyle(fontSize: 13, color: AppColors.info, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  const Text('🔔 Recordatorios preventivos programados: 24h y 2h antes', style: TextStyle(fontSize: 13, color: Colors.grey)),
                 ],
               ),
             ),
@@ -484,7 +737,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cerrar'),
+            child: const Text('Cerrar', style: TextStyle(fontSize: 13)),
           ),
         ],
       ),

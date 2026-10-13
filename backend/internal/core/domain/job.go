@@ -37,12 +37,18 @@ type Job struct {
 	// Estado global oficial de la orden
 	Status                JobStatus     `json:"status"`
 	
-	// Flags independientes de Doble Confirmación
+	// Smart Triage / Benchmark price
+	EstimatedPrice        *float64      `json:"estimated_price,omitempty"`
+
+	// Double Confirmation Flags
 	ClientConfirmedStatus *JobStatus    `json:"client_confirmed_status,omitempty"`
 	TechConfirmedStatus   *JobStatus    `json:"tech_confirmed_status,omitempty"`
 	ClientConfirmedAt     *time.Time    `json:"client_confirmed_at,omitempty"`
 	TechConfirmedAt       *time.Time    `json:"tech_confirmed_at,omitempty"`
 	
+	// Mock Payment & Warranty
+	PaymentReceipt        *PaymentGuaranteeReceipt `json:"payment_receipt,omitempty"`
+
 	// Control de recordatorios preventivos de agenda
 	Reminder24hSentAt     *time.Time    `json:"reminder_24h_sent_at,omitempty"`
 	Reminder2hSentAt      *time.Time    `json:"reminder_2h_sent_at,omitempty"`
@@ -51,6 +57,20 @@ type Job struct {
 	UpdatedAt             time.Time     `json:"updated_at"`
 	CompletedAt           *time.Time    `json:"completed_at,omitempty"`
 	CancelledAt           *time.Time    `json:"cancelled_at,omitempty"`
+}
+
+type JobStatusConfirmation struct {
+	JobID                 uuid.UUID                `json:"job_id"`
+	CallerID              uuid.UUID                `json:"caller_id"`
+	TargetStatus          JobStatus                `json:"target_status"`
+	ClientConfirmed       bool                     `json:"client_confirmed"`
+	TechConfirmed         bool                     `json:"tech_confirmed"`
+	Transitioned          bool                     `json:"transitioned"`
+	PaymentTriggered      bool                     `json:"payment_triggered"`
+	PaymentReceipt        *PaymentGuaranteeReceipt `json:"payment_receipt,omitempty"`
+	WarrantyActive        bool                     `json:"warranty_active"`
+	WarrantyCertificate   string                   `json:"warranty_certificate,omitempty"`
+	Message               string                   `json:"message"`
 }
 
 type JobStatusTransition struct {
@@ -62,6 +82,8 @@ type JobStatusTransition struct {
 	ClientConfirmed    bool      `json:"client_confirmed"`
 	TechConfirmed      bool      `json:"tech_confirmed"`
 	IsCompleted        bool      `json:"is_completed"`
+	PaymentTriggered   bool      `json:"payment_triggered"`
+	WarrantyReleased   bool      `json:"warranty_released"`
 	Notes              string    `json:"notes,omitempty"`
 	CreatedAt          time.Time `json:"created_at"`
 	CompletedAt        *time.Time `json:"completed_at,omitempty"`

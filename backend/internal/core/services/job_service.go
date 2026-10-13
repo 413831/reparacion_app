@@ -12,10 +12,11 @@ import (
 )
 
 type JobService struct {
-	jobRepo      ports.JobRepository
-	proposalRepo ports.ProposalRepository
-	userRepo     ports.UserRepository
-	notifier     ports.ReminderNotifier
+	jobRepo        ports.JobRepository
+	proposalRepo   ports.ProposalRepository
+	userRepo       ports.UserRepository
+	notifier       ports.ReminderNotifier
+	paymentGateway ports.PaymentGateway
 }
 
 func NewJobService(
@@ -23,17 +24,19 @@ func NewJobService(
 	proposalRepo ports.ProposalRepository,
 	userRepo ports.UserRepository,
 	notifier ports.ReminderNotifier,
+	paymentGateway ports.PaymentGateway,
 ) *JobService {
 	return &JobService{
-		jobRepo:      jobRepo,
-		proposalRepo: proposalRepo,
-		userRepo:     userRepo,
-		notifier:     notifier,
+		jobRepo:        jobRepo,
+		proposalRepo:   proposalRepo,
+		userRepo:       userRepo,
+		notifier:       notifier,
+		paymentGateway: paymentGateway,
 	}
 }
 
-// CreateJob creates a service request by a client
-func (s *JobService) CreateJob(ctx context.Context, clientID uuid.UUID, category domain.TradeCategory, title, description, locality string, scheduledAt time.Time, photos []string) (*domain.Job, error) {
+// CreateJob creates a service request by a client, including optional estimated benchmark price
+func (s *JobService) CreateJob(ctx context.Context, clientID uuid.UUID, category domain.TradeCategory, title, description, locality string, scheduledAt time.Time, photos []string, estimatedPrice *float64) (*domain.Job, error) {
 	client, err := s.userRepo.GetByID(ctx, clientID)
 	if err != nil {
 		return nil, fmt.Errorf("cliente no encontrado: %w", err)
@@ -51,6 +54,7 @@ func (s *JobService) CreateJob(ctx context.Context, clientID uuid.UUID, category
 		PhotosURLs:      photos,
 		ScheduledAt:     scheduledAt,
 		GeneralLocality: locality,
+		EstimatedPrice:  estimatedPrice,
 		Status:          domain.StatusPendienteDeAceptacion,
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
@@ -63,7 +67,7 @@ func (s *JobService) CreateJob(ctx context.Context, clientID uuid.UUID, category
 	return job, nil
 }
 
-// ApplyForJob validates KYC status before permitting a proposal
+// ApplyForJob validates KYC status before permitting a proposal (Presupuesto a medida)
 func (s *JobService) ApplyForJob(ctx context.Context, technicianID, jobID uuid.UUID, budget float64, durationHours int, coverNote string) (*domain.Proposal, error) {
 	tech, err := s.userRepo.GetByID(ctx, technicianID)
 	if err != nil {
@@ -111,6 +115,77 @@ func (s *JobService) ApplyForJob(ctx context.Context, technicianID, jobID uuid.U
 	return proposal, nil
 }
 
+// InstantAcceptJob implements 1-tap conversion: technician accepts the Client's suggested price directly
+func (s *JobService) InstantAcceptJob(ctx context.Context, technicianID, jobID uuid.UUID) (*domain.Proposal, *domain.Job, error) {
+	tech, err := s.userRepo.GetByID(ctx, technicianID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("técnico no encontrado: %w", err)
+	}
+
+	if !tech.CanApplyForJobs() {
+		return nil, nil, domain.ErrUserNotVerified
+	}
+
+	job, err := s.jobRepo.GetByID(ctx, jobID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("trabajo no encontrado: %w", err)
+	}
+
+	if job.Status != domain.StatusPendienteDeAceptacion {
+		return nil, nil, errors.New("el trabajo ya no está disponible para aceptación inmediata")
+	}
+
+	budget := 28000.0 // Default benchmark fallback
+	if job.EstimatedPrice != nil && *job.EstimatedPrice > 0 {
+		budget = *job.EstimatedPrice
+	}
+
+	proposal := &domain.Proposal{
+		ID:                     uuid.New(),
+		JobID:                  jobID,
+		TechnicianID:           technicianID,
+		EstimatedBudget:        budget,
+		EstimatedDurationHours: 2,
+		CoverNote:              "Aceptación instantánea al Precio Sugerido por el cliente.",
+		Status:                 domain.ProposalStatusAccepted,
+		CreatedAt:              time.Now(),
+		UpdatedAt:              time.Now(),
+	}
+
+	if err := s.proposalRepo.Create(ctx, proposal); err != nil {
+		return nil, nil, fmt.Errorf("error al registrar propuesta instantánea: %w", err)
+	}
+
+	// Assign technician to job
+	if err := s.jobRepo.AssignTechnician(ctx, job.ID, technicianID); err != nil {
+		return nil, nil, err
+	}
+	job.AssignedTechnicianID = &technicianID
+
+	// Reject other proposals
+	allProposals, _ := s.proposalRepo.ListByJobID(ctx, job.ID)
+	for _, p := range allProposals {
+		if p.ID != proposal.ID && p.Status == domain.ProposalStatusPending {
+			_ = s.proposalRepo.UpdateStatus(ctx, p.ID, domain.ProposalStatusRejected)
+		}
+	}
+
+	// Capture escrow if payment gateway available
+	if s.paymentGateway != nil {
+		_, _ = s.paymentGateway.CaptureEscrow(ctx, job.ID, job.ClientID, technicianID, budget, "mercadopago_escrow")
+	}
+
+	// Automatically register technician confirmation for agendado
+	now := time.Now()
+	targetStatus := domain.StatusAgendado
+	job.TechConfirmedStatus = &targetStatus
+	job.TechConfirmedAt = &now
+	_ = s.jobRepo.UpdateConfirmationStatus(ctx, job)
+
+	updatedJob, _ := s.jobRepo.GetByID(ctx, job.ID)
+	return proposal, updatedJob, nil
+}
+
 // AcceptProposal assigns the technician and registers client's confirmation for scheduling
 func (s *JobService) AcceptProposal(ctx context.Context, clientID, proposalID uuid.UUID) (*domain.Job, error) {
 	proposal, err := s.proposalRepo.GetByID(ctx, proposalID)
@@ -146,6 +221,11 @@ func (s *JobService) AcceptProposal(ctx context.Context, clientID, proposalID uu
 		}
 	}
 
+	// Capture escrow hold
+	if s.paymentGateway != nil {
+		_, _ = s.paymentGateway.CaptureEscrow(ctx, job.ID, clientID, proposal.TechnicianID, proposal.EstimatedBudget, "mercadopago_escrow")
+	}
+
 	// Automatically register client confirmation for 'agendado'
 	_, _, _ = s.ConfirmJobStatusTransition(ctx, job.ID, clientID, domain.StatusAgendado)
 
@@ -156,21 +236,47 @@ func (s *JobService) AcceptProposal(ctx context.Context, clientID, proposalID uu
 // ConfirmJobStatusTransition executes the Double Confirmation business rule:
 // El cambio de estado requiere la confirmación de ambas partes (cliente y técnico).
 // Cuando ambos coinciden, el estado global de la orden transiciona oficialmente.
-func (s *JobService) ConfirmJobStatusTransition(ctx context.Context, jobID, callerID uuid.UUID, targetStatus domain.JobStatus) (*domain.Job, bool, error) {
+// Al finalizar, se procesa la pasarela de pagos mock (MercadoPago) y se libera la Garantía de 30 días.
+func (s *JobService) ConfirmJobStatusTransition(ctx context.Context, jobID, callerID uuid.UUID, targetStatus domain.JobStatus) (*domain.Job, *domain.JobStatusConfirmation, error) {
 	job, err := s.jobRepo.GetByID(ctx, jobID)
 	if err != nil {
-		return nil, false, fmt.Errorf("trabajo no encontrado: %w", err)
+		return nil, nil, fmt.Errorf("trabajo no encontrado: %w", err)
 	}
 
 	fromStatus := job.Status
 	transitioned, err := job.ConfirmStatus(callerID, targetStatus)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, err
+	}
+
+	confirmation := &domain.JobStatusConfirmation{
+		JobID:            job.ID,
+		CallerID:         callerID,
+		TargetStatus:     targetStatus,
+		ClientConfirmed:  job.ClientConfirmedStatus != nil && *job.ClientConfirmedStatus == targetStatus,
+		TechConfirmed:    job.TechConfirmedStatus != nil && *job.TechConfirmedStatus == targetStatus,
+		Transitioned:     transitioned,
+		PaymentTriggered: false,
+		WarrantyActive:   false,
+	}
+
+	// Handle Payment release & Warranty activation on finalization
+	if transitioned && targetStatus == domain.StatusFinalizado {
+		if s.paymentGateway != nil {
+			receipt, pErr := s.paymentGateway.ReleaseEscrowAndWarranty(ctx, job.ID)
+			if pErr == nil && receipt != nil {
+				job.PaymentReceipt = receipt
+				confirmation.PaymentTriggered = true
+				confirmation.PaymentReceipt = receipt
+				confirmation.WarrantyActive = true
+				confirmation.WarrantyCertificate = receipt.WarrantyCertificate
+			}
+		}
 	}
 
 	// Persist the confirmation flags and any resulting global status change
 	if err := s.jobRepo.UpdateConfirmationStatus(ctx, job); err != nil {
-		return nil, false, fmt.Errorf("error al actualizar el estado de confirmación: %w", err)
+		return nil, nil, fmt.Errorf("error al actualizar el estado de confirmación: %w", err)
 	}
 
 	// Record audit transition
@@ -180,9 +286,11 @@ func (s *JobService) ConfirmJobStatusTransition(ctx context.Context, jobID, call
 		InitiatedByUserID: callerID,
 		FromStatus:        fromStatus,
 		TargetStatus:      targetStatus,
-		ClientConfirmed:   job.ClientConfirmedStatus != nil && *job.ClientConfirmedStatus == targetStatus,
-		TechConfirmed:     job.TechConfirmedStatus != nil && *job.TechConfirmedStatus == targetStatus,
+		ClientConfirmed:   confirmation.ClientConfirmed,
+		TechConfirmed:     confirmation.TechConfirmed,
 		IsCompleted:       transitioned,
+		PaymentTriggered:  confirmation.PaymentTriggered,
+		WarrantyReleased:  confirmation.WarrantyActive,
 		CreatedAt:         time.Now(),
 	}
 	_ = s.jobRepo.RecordTransition(ctx, transition)
@@ -201,5 +309,14 @@ func (s *JobService) ConfirmJobStatusTransition(ctx context.Context, jobID, call
 		}
 	}
 
-	return job, transitioned, nil
+	if transitioned {
+		confirmation.Message = fmt.Sprintf("¡Doble confirmación exitosa! Estado global actualizado a %s.", targetStatus)
+		if confirmation.WarrantyActive {
+			confirmation.Message += " Pago liberado y Garantía Reparatutti de 30 días activada."
+		}
+	} else {
+		confirmation.Message = "Confirmación registrada. Esperando la confirmación de la contraparte para completar la transición."
+	}
+
+	return job, confirmation, nil
 }

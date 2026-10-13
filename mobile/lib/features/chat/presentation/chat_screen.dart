@@ -258,18 +258,39 @@ class _ChatScreenState extends State<ChatScreen> {
                         widget.technicianName,
                         style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                       ),
-                      const SizedBox(width: 4),
-                      const Icon(Icons.verified, size: 14, color: AppColors.success),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.success.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.shield_rounded, size: 13, color: AppColors.success),
+                            SizedBox(width: 3),
+                            Text(
+                              'Verificado',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.success,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                   Row(
                     children: [
-                      const Icon(Icons.star_rounded, size: 13, color: AppColors.accentYellow),
+                      const Icon(Icons.star_rounded, size: 14, color: AppColors.accentYellow),
                       const SizedBox(width: 2),
                       Text(
                         '${widget.technicianRating.toStringAsFixed(2)} • ${widget.categoryTitle}',
                         style: TextStyle(
-                          fontSize: 11,
+                          fontSize: 13,
                           color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
                         ),
                       ),
@@ -294,7 +315,7 @@ class _ChatScreenState extends State<ChatScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Prominent "Compartir Dirección Exacta" Action Banner
+            // Prominent "Enviar Ubicación Exacta" Action Banner
             if (widget.isClient)
               Container(
                 width: double.infinity,
@@ -314,13 +335,13 @@ class _ChatScreenState extends State<ChatScreen> {
                     const Expanded(
                       child: Text(
                         'Coordinación de visita técnica:',
-                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                       ),
                     ),
                     ElevatedButton.icon(
                       onPressed: _openShareLocationDialog,
                       icon: const Icon(Icons.send_rounded, size: 14),
-                      label: const Text('Enviar dirección exacta', style: TextStyle(fontSize: 12)),
+                      label: const Text('Enviar Ubicación Exacta', style: TextStyle(fontSize: 13)),
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         backgroundColor: isDark ? AppColors.mustardDark : AppColors.mustardLight,
@@ -333,7 +354,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
               ),
 
-            // Messages List
+            // Message List
             Expanded(
               child: ListView.builder(
                 controller: _scrollController,
@@ -368,7 +389,7 @@ class _ChatScreenState extends State<ChatScreen> {
             msg.content,
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: 11.5,
+              fontSize: 13,
               color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
             ),
           ),

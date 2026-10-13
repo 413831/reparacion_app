@@ -38,8 +38,11 @@ func (h *UserHandler) DeleteAccount(c *gin.Context) {
 		return
 	}
 
+	// Explicit session invalidation header and compliance metadata
+	c.Header("Clear-Site-Data", `"cache", "cookies", "storage"`)
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Cuenta eliminada definitivamente conforme a las directrices de privacidad y App Store.",
+		"status":  "deleted",
+		"message": "Cuenta eliminada y anonimizada definitivamente conforme a las directrices de privacidad y App Store Guideline 5.1.1(v).",
 	})
 }
 

@@ -125,11 +125,10 @@ func (r *InMemoryUserRepo) DeleteAccount(ctx context.Context, id uuid.UUID) erro
 	if !exists {
 		return errors.New("user not found")
 	}
-	now := time.Now()
-	user.AccountStatus = domain.AccountStatusDeleted
-	user.IsActive = false
-	user.DeletedAt = &now
-	user.UpdatedAt = now
+	oldEmail := user.Email
+	user.AnonymizeForDeletion()
+	delete(r.byEmail, oldEmail)
+	r.byEmail[user.Email] = user.ID
 	return nil
 }
 

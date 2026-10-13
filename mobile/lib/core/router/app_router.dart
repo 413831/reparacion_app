@@ -1,8 +1,10 @@
 import 'package:go_router/go_router.dart';
+import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/terms_and_conditions_screen.dart';
 import '../../features/kyc/presentation/kyc_verification_screen.dart';
 import '../../features/chat/presentation/chat_screen.dart';
 import '../../features/home/presentation/home_dashboard_screen.dart';
+import '../../features/navigation/presentation/forced_update_screen.dart';
 
 class AppRouter {
   static final router = GoRouter(
@@ -11,6 +13,27 @@ class AppRouter {
       GoRoute(
         path: '/',
         builder: (context, state) => const HomeDashboardScreen(),
+      ),
+      GoRoute(
+        path: '/login',
+        builder: (context, state) => const LoginScreen(),
+      ),
+      GoRoute(
+        path: '/force-update',
+        builder: (context, state) {
+          final storeUrl = state.uri.queryParameters['storeUrl'] ?? 'https://apps.apple.com';
+          final message = state.uri.queryParameters['message'] ??
+              'Una actualización crítica es requerida para continuar utilizando Reparatutti.';
+          final minBuild = int.tryParse(state.uri.queryParameters['minBuild'] ?? '2') ?? 2;
+          final currentBuild = int.tryParse(state.uri.queryParameters['currentBuild'] ?? '1') ?? 1;
+
+          return ForcedUpdateScreen(
+            storeUrl: storeUrl,
+            message: message,
+            minBuild: minBuild,
+            currentBuild: currentBuild,
+          );
+        },
       ),
       GoRoute(
         path: '/terms',

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type UserRole string
@@ -25,10 +26,12 @@ const (
 )
 
 const DefaultTermsPlaceholder = "[CONFIG_TERMINOS_Y_CONDICIONES_LEGALES]"
+const MinPasswordLength = 8
 
 type TradeCategory string
 
 const (
+	TradePlomeria            TradeCategory = "plomeria"
 	TradeElectricidad        TradeCategory = "electricidad"
 	TradePintura             TradeCategory = "pintura"
 	TradeGas                 TradeCategory = "gas"
@@ -61,11 +64,54 @@ type User struct {
 }
 
 var (
-	ErrUserNotVerified      = errors.New("technician must have KYC status verified to perform this action")
-	ErrInvalidRole          = errors.New("invalid user role")
-	ErrTermsNotAccepted     = errors.New("terms and conditions under Argentine law must be explicitly accepted")
-	ErrInvalidRatingScore   = errors.New("rating score must be between 1 and 5")
+	ErrUserNotVerified    = errors.New("technician must have KYC status verified to perform this action")
+	ErrInvalidRole        = errors.New("invalid user role")
+	ErrTermsNotAccepted   = errors.New("terms and conditions under Argentine law must be explicitly accepted")
+	ErrInvalidRatingScore = errors.New("rating score must be between 1 and 5")
+	ErrPasswordTooShort   = errors.New("password must be at least 8 characters long")
+	ErrPasswordEmpty      = errors.New("password cannot be empty")
 )
+
+// SetPassword hashes the given plaintext password with bcrypt (DefaultCost) and stores the hash
+func (u *User) SetPassword(plainPassword string) error {
+	if plainPassword == "" {
+		return ErrPasswordEmpty
+	}
+	if len(plainPassword) < MinPasswordLength {
+		return ErrPasswordTooShort
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(plainPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	u.PasswordHash = string(hash)
+	return nil
+}
+
+// CheckPassword verifies if the given plaintext password matches the stored bcrypt hash
+func (u *User) CheckPassword(plainPassword string) bool {
+	if u.PasswordHash == "" || plainPassword == "" {
+		return false
+	}
+	return bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(plainPassword)) == nil
+}
+
+// AnonymizeForDeletion soft-deletes and anonymizes user PII per GDPR, Argentine Law 25.326,
+// and Apple App Store Review Guideline 5.1.1(v).
+func (u *User) AnonymizeForDeletion() {
+	now := time.Now()
+	u.AccountStatus = AccountStatusDeleted
+	u.IsActive = false
+	u.DeletedAt = &now
+	u.UpdatedAt = now
+	u.FullName = "Usuario Eliminado"
+	u.Email = "deleted_" + u.ID.String() + "@anonymized.reparatutti.com"
+	u.PhoneNumber = "+0000000000"
+	u.PasswordHash = ""
+	u.AvatarURL = ""
+}
 
 // CanApplyForJobs validates business rule:
 // "Técnicos con estado unverified o pending no pueden postularse a trabajos."

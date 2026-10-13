@@ -9,7 +9,6 @@ import (
 	"github.com/reparatutti/backend/internal/adapters/handlers/middleware"
 	"github.com/reparatutti/backend/internal/core/domain"
 	"github.com/reparatutti/backend/internal/core/ports"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type AuthHandler struct {
@@ -71,16 +70,9 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "error hashing password"})
-		return
-	}
-
 	user := &domain.User{
 		ID:              uuid.New(),
 		Email:           req.Email,
-		PasswordHash:    string(hash),
 		FullName:        req.FullName,
 		PhoneNumber:     req.PhoneNumber,
 		Role:            req.Role,
@@ -94,6 +86,11 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		IsActive:        true,
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
+	}
+
+	if err := user.SetPassword(req.Password); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "error en contraseña: " + err.Error()})
+		return
 	}
 
 	if err := h.userRepo.Create(c.Request.Context(), user); err != nil {
@@ -124,7 +121,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+	if !user.CheckPassword(req.Password) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Credenciales inválidas"})
 		return
 	}

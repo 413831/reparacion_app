@@ -26,12 +26,13 @@ func NewJobHandler(jobService *services.JobService, jobRepo ports.JobRepository,
 }
 
 type CreateJobRequest struct {
-	Category     domain.TradeCategory `json:"category" binding:"required"`
-	Title        string               `json:"title" binding:"required"`
-	Description  string               `json:"description" binding:"required"`
-	Locality     string               `json:"locality" binding:"required"`
-	ScheduledAt  time.Time            `json:"scheduled_at" binding:"required"`
-	Photos       []string             `json:"photos"`
+	Category       domain.TradeCategory `json:"category" binding:"required"`
+	Title          string               `json:"title" binding:"required"`
+	Description    string               `json:"description" binding:"required"`
+	Locality       string               `json:"locality" binding:"required"`
+	ScheduledAt    time.Time            `json:"scheduled_at" binding:"required"`
+	Photos         []string             `json:"photos"`
+	EstimatedPrice *float64             `json:"estimated_price"`
 }
 
 type ApplyJobRequest struct {
@@ -53,7 +54,7 @@ func (h *JobHandler) CreateJob(c *gin.Context) {
 		return
 	}
 
-	job, err := h.jobService.CreateJob(c.Request.Context(), clientID, req.Category, req.Title, req.Description, req.Locality, req.ScheduledAt, req.Photos)
+	job, err := h.jobService.CreateJob(c.Request.Context(), clientID, req.Category, req.Title, req.Description, req.Locality, req.ScheduledAt, req.Photos, req.EstimatedPrice)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -160,7 +161,29 @@ func (h *JobHandler) AcceptProposal(c *gin.Context) {
 	})
 }
 
-// ConfirmStatus handles the Double Confirmation endpoint
+// InstantAccept handles 1-tap technician acceptance of client's suggested price
+func (h *JobHandler) InstantAccept(c *gin.Context) {
+	techID := c.MustGet("user_id").(uuid.UUID)
+	jobID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id de trabajo inválido"})
+		return
+	}
+
+	proposal, job, err := h.jobService.InstantAcceptJob(c.Request.Context(), techID, jobID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":  "¡Trabajo aceptado instantáneamente al precio sugerido!",
+		"proposal": proposal,
+		"job":      job,
+	})
+}
+
+// ConfirmStatus handles the Double Confirmation endpoint with payment & warranty details
 func (h *JobHandler) ConfirmStatus(c *gin.Context) {
 	userID := c.MustGet("user_id").(uuid.UUID)
 	jobID, err := uuid.Parse(c.Param("id"))
@@ -175,20 +198,16 @@ func (h *JobHandler) ConfirmStatus(c *gin.Context) {
 		return
 	}
 
-	job, transitioned, err := h.jobService.ConfirmJobStatusTransition(c.Request.Context(), jobID, userID, req.TargetStatus)
+	job, confirmation, err := h.jobService.ConfirmJobStatusTransition(c.Request.Context(), jobID, userID, req.TargetStatus)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	message := "Confirmación registrada. Pendiente la confirmación de la otra parte."
-	if transitioned {
-		message = "¡Doble confirmación completada! El estado oficial del trabajo se actualizó a: " + string(job.Status)
-	}
-
 	c.JSON(http.StatusOK, gin.H{
-		"message":      message,
-		"transitioned": transitioned,
+		"message":      confirmation.Message,
+		"transitioned": confirmation.Transitioned,
+		"confirmation": confirmation,
 		"job":          job,
 	})
 }
